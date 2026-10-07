@@ -22,7 +22,9 @@ import {
   LayoutGrid,
   Files,
   Check,
-  Copy
+  Copy,
+  ListFilter,
+  CheckSquare
 } from 'lucide-vue-next'
 import { EditorState } from '@codemirror/state'
 import { EditorView, lineNumbers, keymap } from '@codemirror/view'
@@ -378,6 +380,139 @@ async function deleteProfile(name: string) {
   } catch (e: any) {
     alert('请求错误: ' + e.message)
   }
+}
+
+// Copy current profile states & methods
+const showCopyProfileModal = ref(false)
+const copyProfileName = ref('')
+
+function openCopyProfileModal() {
+  const base = currentSelectedConfig.value.replace(/\.dae$/, '')
+  copyProfileName.value = `${base}_copy.dae`
+  showCopyProfileModal.value = true
+}
+
+async function copyCurrentProfile() {
+  let name = copyProfileName.value.trim()
+  if (!name) {
+    alert('请输入新建文件名称')
+    return
+  }
+  if (!name.endsWith('.dae')) {
+    name += '.dae'
+  }
+  try {
+    const res = await fetch('/api/configs/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content: configContent.value })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      showCopyProfileModal.value = false
+      alert(`成功复制并新建配置文件 [${data.name}]！`)
+      await fetchConfigProfiles()
+      await handleSelectProfile(data.name)
+    } else {
+      alert('复制失败: ' + (data.error || '') + '\n' + (data.details || ''))
+    }
+  } catch (e: any) {
+    alert('请求失败: ' + e.message)
+  }
+}
+
+// Subscription nodes fetching & importing
+interface SubFetchedNode {
+  key: string
+  protocol: string
+  name: string
+  address: string
+  port: string
+  country: string
+  flag: string
+  url: string
+  selected?: boolean
+}
+
+const showSubNodesModal = ref(false)
+const fetchingSubNodes = ref(false)
+const currentSubTag = ref('')
+const subFetchedNodes = ref<SubFetchedNode[]>([])
+const selectAllSubNodes = ref(true)
+
+async function fetchSubNodes(sub: ConfigSubItem) {
+  currentSubTag.value = sub.tag
+  fetchingSubNodes.value = true
+  showSubNodesModal.value = true
+  subFetchedNodes.value = []
+  try {
+    const res = await fetch('/api/subscription/nodes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag: sub.tag, url: sub.url })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      subFetchedNodes.value = (data.nodes || []).map((n: any) => ({
+        ...n,
+        selected: true
+      }))
+      selectAllSubNodes.value = true
+    } else {
+      alert('读取订阅节点失败: ' + (data.error || ''))
+      showSubNodesModal.value = false
+    }
+  } catch (e: any) {
+    alert('请求失败: ' + e.message)
+    showSubNodesModal.value = false
+  } finally {
+    fetchingSubNodes.value = false
+  }
+}
+
+function toggleSelectAllSubNodes() {
+  selectAllSubNodes.value = !selectAllSubNodes.value
+  for (const n of subFetchedNodes.value) {
+    n.selected = selectAllSubNodes.value
+  }
+}
+
+const selectedSubNodesCount = computed(() => {
+  return subFetchedNodes.value.filter(n => n.selected).length
+})
+
+function importSelectedSubNodes() {
+  const selected = subFetchedNodes.value.filter(n => n.selected)
+  if (selected.length === 0) {
+    alert('请至少勾选一个要导入的代理节点')
+    return
+  }
+
+  let importedCount = 0
+  for (const item of selected) {
+    let candidateKey = item.key || `${currentSubTag.value}_${importedCount + 1}`
+    let suffix = 1
+    while (configModel.value.nodes.some(n => n.key === candidateKey)) {
+      candidateKey = `${item.key}_${suffix}`
+      suffix++
+    }
+
+    configModel.value.nodes.push({
+      key: candidateKey,
+      url: item.url,
+      protocol: item.protocol,
+      name: item.name || candidateKey,
+      address: item.address,
+      port: String(item.port || '443')
+    })
+    importedCount++
+  }
+
+  isDirty.value = true
+  syncModelToCode()
+  showSubNodesModal.value = false
+  alert(`已成功导入 ${importedCount} 个节点到当前配置 [${currentSelectedConfig.value}]！\n请点击右上角「保存配置」完成写入。`)
+  activeSection.value = 'nodes'
 }
 
 async function switchMode(mode: Mode) {
@@ -851,9 +986,17 @@ onMounted(() => {
           <button
             class="btn-icon-subtle"
             @click="openCreateProfileModal"
-            title="新建配置文件方案 (基于当前模板克隆)"
+            title="新建空白配置文件方案"
           >
             <Plus :size="14" />
+          </button>
+
+          <button
+            class="btn-icon-subtle"
+            @click="openCopyProfileModal"
+            title="复制当前配置文件并新建文件"
+          >
+            <Copy :size="14" />
           </button>
 
           <button
@@ -1213,7 +1356,14 @@ onMounted(() => {
               <div class="card-top">
                 <span class="sub-badge">Sub</span>
                 <span class="card-key">{{ sub.tag }}</span>
-                <button class="btn-icon delete" @click="deleteSub(sub.tag)"><Trash2 :size="13" /></button>
+                <div class="card-actions">
+                  <button class="btn-sub-fetch" @click="fetchSubNodes(sub)" title="读取该订阅包含的节点列表">
+                    <ListFilter :size="13" /> 读取节点
+                  </button>
+                  <button class="btn-icon delete" @click="deleteSub(sub.tag)" title="删除订阅">
+                    <Trash2 :size="13" />
+                  </button>
+                </div>
               </div>
               <div class="card-info">
                 <div class="row">
@@ -1450,6 +1600,110 @@ onMounted(() => {
           <div class="modal-actions">
             <button class="btn btn-secondary" @click="showNewProfileModal = false">取消</button>
             <button class="btn btn-primary" @click="createNewProfile">创建方案</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Copy Profile Modal -->
+    <div v-if="showCopyProfileModal" class="modal-backdrop" @click.self="showCopyProfileModal = false">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3><Copy class="icon" :size="18" /> 复制当前配置文件并新建</h3>
+          <button class="close-btn" @click="showCopyProfileModal = false">&times;</button>
+        </div>
+        <div class="modal-body form-modal">
+          <div class="field">
+            <label>新建配置文件名称 (.dae)</label>
+            <input
+              v-model="copyProfileName"
+              placeholder="例如: copy_of_config.dae"
+              @keydown.enter="copyCurrentProfile"
+            />
+            <span class="field-hint">将完整复制当前文件 [{{ currentSelectedConfig }}] 的全部参数、节点与规则并新建独立方案。</span>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" @click="showCopyProfileModal = false">取消</button>
+            <button class="btn btn-primary" @click="copyCurrentProfile">复制并新建</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subscription Nodes Modal -->
+    <div v-if="showSubNodesModal" class="modal-backdrop" @click.self="showSubNodesModal = false">
+      <div class="modal-card modal-large">
+        <div class="modal-header">
+          <h3><ListFilter class="icon" :size="18" /> 订阅节点列表 - [{{ currentSubTag }}]</h3>
+          <button class="close-btn" @click="showSubNodesModal = false">&times;</button>
+        </div>
+        <div class="modal-body sub-nodes-modal">
+          <div v-if="fetchingSubNodes" class="sub-loading-box">
+            <RefreshCw class="icon spin" :size="24" />
+            <span>正在读取并解析订阅节点列表中...</span>
+          </div>
+          <div v-else-if="subFetchedNodes.length === 0" class="empty-state">
+            未在该订阅中解析出任何有效代理节点链接
+          </div>
+          <div v-else class="sub-nodes-container">
+            <div class="sub-nodes-toolbar">
+              <div class="sub-summary">
+                共获取到 <strong>{{ subFetchedNodes.length }}</strong> 个节点，已选择 <strong>{{ selectedSubNodesCount }}</strong> 个
+              </div>
+              <button class="btn-text" @click="toggleSelectAllSubNodes">
+                <CheckSquare :size="14" /> {{ selectAllSubNodes ? '取消全选' : '全选所有' }}
+              </button>
+            </div>
+
+            <div class="sub-nodes-table-wrap">
+              <table class="sub-nodes-table">
+                <thead>
+                  <tr>
+                    <th style="width: 38px"></th>
+                    <th style="width: 80px">协议</th>
+                    <th>节点名称 (Alias)</th>
+                    <th>服务器地址</th>
+                    <th style="width: 90px">地区</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="(node, idx) in subFetchedNodes"
+                    :key="idx"
+                    :class="{ 'row-selected': node.selected }"
+                    @click="node.selected = !node.selected"
+                  >
+                    <td class="checkbox-col" @click.stop>
+                      <input type="checkbox" v-model="node.selected" />
+                    </td>
+                    <td>
+                      <span class="proto-badge-sm">{{ node.protocol || 'NODE' }}</span>
+                    </td>
+                    <td class="name-cell bold">
+                      <span class="truncate" :title="node.name">{{ node.name }}</span>
+                    </td>
+                    <td class="mono address-cell">
+                      {{ node.address }}:{{ node.port }}
+                    </td>
+                    <td>
+                      <span class="country-tag">{{ node.flag }} {{ node.country }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="modal-actions" style="margin-top: 14px">
+              <button class="btn btn-secondary" @click="showSubNodesModal = false">取消</button>
+              <button
+                class="btn btn-primary"
+                :disabled="selectedSubNodesCount === 0"
+                @click="importSelectedSubNodes"
+              >
+                <Plus :size="14" />
+                <span>导入所选 {{ selectedSubNodesCount }} 个节点到配置</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -2231,5 +2485,141 @@ onMounted(() => {
 
 .hidden {
   display: none;
+}
+
+.modal-large {
+  max-width: 820px;
+  width: 90%;
+}
+
+.btn-sub-fetch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #38bdf8;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-sub-fetch:hover {
+  background: #334155;
+  color: #7dd3fc;
+  border-color: #0284c7;
+}
+
+.sub-loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.sub-nodes-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sub-nodes-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #1e293b;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.sub-nodes-toolbar strong {
+  color: #38bdf8;
+}
+
+.sub-nodes-table-wrap {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  background: #090d16;
+}
+
+.sub-nodes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.sub-nodes-table th {
+  position: sticky;
+  top: 0;
+  background: #0f172a;
+  color: #94a3b8;
+  font-weight: 500;
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #1e293b;
+  z-index: 1;
+}
+
+.sub-nodes-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #1e293b;
+  color: #cbd5e1;
+}
+
+.sub-nodes-table tr {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sub-nodes-table tr:hover {
+  background: rgba(30, 41, 59, 0.5);
+}
+
+.sub-nodes-table tr.row-selected {
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.checkbox-col {
+  text-align: center;
+}
+
+.checkbox-col input {
+  cursor: pointer;
+}
+
+.proto-badge-sm {
+  display: inline-block;
+  padding: 2px 6px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #38bdf8;
+}
+
+.country-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #94a3b8;
 }
 </style>
