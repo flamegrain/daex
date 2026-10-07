@@ -6,8 +6,7 @@ import {
   Edit2,
   Trash2,
   Copy,
-  ArrowUp,
-  ArrowDown,
+  GripVertical,
   ShieldCheck,
   ShieldAlert,
   AlertTriangle,
@@ -476,22 +475,55 @@ function deleteRule(idx: number) {
   syncModelToBackend()
 }
 
-function moveRuleUp(idx: number) {
-  if (idx <= 0) return
+// Drag & Drop free reordering (HTML5 Native Drag & Drop)
+const draggedRuleIndex = ref<number | null>(null)
+const dragOverTargetIndex = ref<number | null>(null)
+
+function onRuleDragStart(idx: number, event: DragEvent) {
+  const rule = configModel.value.routingRules[idx]
+  if (rule.condition.trim() === 'fallback') {
+    event.preventDefault()
+    return
+  }
+  draggedRuleIndex.value = idx
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(idx))
+  }
+}
+
+function onRuleDragOver(idx: number, event: DragEvent) {
+  if (draggedRuleIndex.value === null || draggedRuleIndex.value === idx) return
+  event.preventDefault()
+  dragOverTargetIndex.value = idx
+}
+
+function onRuleDrop(idx: number, event: DragEvent) {
+  event.preventDefault()
+  if (draggedRuleIndex.value === null || draggedRuleIndex.value === idx) {
+    onRuleDragEnd()
+    return
+  }
+
+  const from = draggedRuleIndex.value
+  let to = idx
   const rules = configModel.value.routingRules
-  const tmp = rules[idx]
-  rules[idx] = rules[idx - 1]
-  rules[idx - 1] = tmp
+
+  // 如果拖放到 fallback 身上，限制放在 fallback 前一位
+  if (rules[to]?.condition.trim() === 'fallback') {
+    to = Math.max(0, to - 1)
+  }
+
+  const [movedItem] = rules.splice(from, 1)
+  rules.splice(to, 0, movedItem)
+
+  onRuleDragEnd()
   syncModelToBackend()
 }
 
-function moveRuleDown(idx: number) {
-  const rules = configModel.value.routingRules
-  if (idx >= rules.length - 1) return
-  const tmp = rules[idx]
-  rules[idx] = rules[idx + 1]
-  rules[idx + 1] = tmp
-  syncModelToBackend()
+function onRuleDragEnd() {
+  draggedRuleIndex.value = null
+  dragOverTargetIndex.value = null
 }
 
 function duplicateRule(idx: number) {
@@ -997,11 +1029,12 @@ onMounted(async () => {
             <table class="routing-table">
               <thead>
                 <tr>
-                  <th style="width: 60px"># 序号</th>
+                  <th style="width: 44px; text-align: center" title="按住手柄上下拖动">拖动</th>
+                  <th style="width: 50px"># 序号</th>
                   <th>匹配条件 (Condition)</th>
                   <th style="width: 170px">动作出口 (Target)</th>
                   <th style="width: 130px">状态健康</th>
-                  <th style="width: 180px; text-align: right">排序与操作</th>
+                  <th style="width: 140px; text-align: right">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -1009,18 +1042,42 @@ onMounted(async () => {
                   v-for="(rule, idx) in configModel.routingRules"
                   :key="idx"
                   :id="`routing-table-row-${idx}`"
+                  :draggable="rule.condition !== 'fallback'"
+                  @dragstart="onRuleDragStart(idx, $event)"
+                  @dragover="onRuleDragOver(idx, $event)"
+                  @drop="onRuleDrop(idx, $event)"
+                  @dragend="onRuleDragEnd"
                   :class="{
                     'row-highlighted': highlightedRuleIndex === idx,
+                    'row-dragging': draggedRuleIndex === idx,
+                    'row-drag-over': dragOverTargetIndex === idx,
+                    'row-fallback-fixed': rule.condition === 'fallback',
                     'row-error': routingHealthReport.ruleStatusMap[idx]?.severity === 'error',
                     'row-warning': routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'
                   }"
                 >
+                  <td class="drag-grip-col">
+                    <div
+                      v-if="rule.condition !== 'fallback'"
+                      class="drag-handle-grip"
+                      title="按住鼠标拖拽自由上下调整优先级"
+                    >
+                      <GripVertical :size="16" />
+                    </div>
+                    <div
+                      v-else
+                      class="drag-handle-grip disabled"
+                      title="兜底规则固定于末尾，无法拖动"
+                    >
+                      <GripVertical :size="16" />
+                    </div>
+                  </td>
                   <td class="idx-col">
                     <span class="idx-chip">{{ idx + 1 }}</span>
                   </td>
                   <td class="cond-col mono">
                     <span v-if="rule.condition === 'fallback'" class="fallback-badge">
-                      兜底规则 (fallback)
+                      兜底规则 (fallback - 固定于末尾)
                     </span>
                     <span v-else class="rule-code-text">{{ rule.condition }}</span>
                   </td>
@@ -1047,22 +1104,6 @@ onMounted(async () => {
                     </span>
                   </td>
                   <td class="actions-col">
-                    <button
-                      class="btn-icon"
-                      :disabled="idx === 0"
-                      @click="moveRuleUp(idx)"
-                      title="上移此规则 (提高匹配优先级)"
-                    >
-                      <ArrowUp :size="13" />
-                    </button>
-                    <button
-                      class="btn-icon"
-                      :disabled="idx === configModel.routingRules.length - 1"
-                      @click="moveRuleDown(idx)"
-                      title="下移此规则 (降低匹配优先级)"
-                    >
-                      <ArrowDown :size="13" />
-                    </button>
                     <button
                       class="btn-icon"
                       @click="duplicateRule(idx)"
@@ -2043,6 +2084,56 @@ onMounted(async () => {
 
 .routing-table tr.row-warning {
   border-left: 3px solid #f59e0b;
+}
+
+/* Drag & Drop Grip and Fixed Fallback */
+.drag-grip-col {
+  text-align: center;
+  width: 44px;
+}
+
+.drag-handle-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #94a3b8);
+  cursor: grab;
+  padding: 3px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.drag-handle-grip:hover {
+  color: #0284c7;
+  background: var(--bg-input, #1e293b);
+}
+
+.drag-handle-grip:active {
+  cursor: grabbing;
+}
+
+.drag-handle-grip.disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.routing-table tr.row-dragging {
+  opacity: 0.4;
+  background: var(--bg-input, #1e293b) !important;
+}
+
+.routing-table tr.row-drag-over {
+  box-shadow: inset 0 2px 0 #0284c7, inset 0 -2px 0 #0284c7;
+  background: rgba(2, 132, 199, 0.08) !important;
+}
+
+.routing-table tr.row-fallback-fixed {
+  background: rgba(148, 163, 184, 0.04) !important;
+  cursor: not-allowed;
+}
+
+.routing-table tr.row-fallback-fixed td {
+  color: var(--text-muted, #94a3b8) !important;
 }
 
 .idx-chip {

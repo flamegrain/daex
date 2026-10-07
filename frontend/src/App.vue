@@ -19,6 +19,7 @@ import DashboardView from './views/DashboardView.vue'
 import NodesView from './views/NodesView.vue'
 import UpdateView from './views/UpdateView.vue'
 import SettingsView from './views/SettingsView.vue'
+import LogsView from './views/LogsView.vue'
 import { t, theme, applyTheme } from './composables/useSettings'
 
 type Tab = 'home' | 'config' | 'routing' | 'nodes' | 'logs' | 'service' | 'update' | 'settings'
@@ -197,11 +198,7 @@ onMounted(() => {
       <RoutingView v-else-if="activeTab === 'routing'" />
       <NodesView v-else-if="activeTab === 'nodes'" />
 
-      <div v-else-if="activeTab === 'logs'" class="placeholder-view">
-        <Terminal :size="48" class="ph-icon" />
-        <h3>实时日志与调试（下一步开发中）</h3>
-        <p>集成 WebSocket / SSE 实时推流 <code>journalctl -u dae -f</code>，提供分级高亮与关键字过滤。</p>
-      </div>
+      <LogsView v-else-if="activeTab === 'logs'" />
 
       <div v-else-if="activeTab === 'service'" class="placeholder-view">
         <Activity :size="48" class="ph-icon" />

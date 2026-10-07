@@ -905,6 +905,14 @@ func main() {
 		_, _ = w.Write(b)
 	})
 
+	// 6.1 Logs management (live logs, search, level filter, backup and download)
+	mux.HandleFunc("GET /api/logs", handleGetLogs(o))
+	mux.HandleFunc("GET /api/logs/download", handleDownloadLogs(o))
+	mux.HandleFunc("POST /api/logs/backup", handleCreateLogBackup(o))
+	mux.HandleFunc("GET /api/logs/backups", handleListLogBackups(o))
+	mux.HandleFunc("GET /api/logs/backups/{name}/download", handleDownloadLogBackup(o))
+	mux.HandleFunc("DELETE /api/logs/backups/{name}", handleDeleteLogBackup(o))
+
 	// 7. Settings & WebUI User
 	mux.HandleFunc("GET /api/settings/user", func(w http.ResponseWriter, r *http.Request) {
 		cfgDir := filepath.Dir(o.DaeConfig)

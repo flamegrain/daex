@@ -415,22 +415,22 @@ onMounted(() => {
           </button>
         </div>
 
-        <div class="card-grid">
-          <div class="info-item">
-            <span class="info-label">当前版本</span>
-            <span class="info-val">v{{ templateMeta.version }}</span>
+        <div class="meta-grid">
+          <div class="meta-item">
+            <span class="meta-lbl">当前版本</span>
+            <span class="meta-val mono bold">v{{ templateMeta.version }}</span>
           </div>
-          <div class="info-item">
-            <span class="info-label">包含模板</span>
-            <span class="info-val">{{ templateMeta.count }} 个精选场景模板</span>
+          <div class="meta-item">
+            <span class="meta-lbl">包含模板</span>
+            <span class="meta-val">{{ templateMeta.count }} 个精选场景</span>
           </div>
-          <div class="info-item">
-            <span class="info-label">最近更新</span>
-            <span class="info-val">{{ templateMeta.updatedAt }}</span>
+          <div class="meta-item">
+            <span class="meta-lbl">最近更新</span>
+            <span class="meta-val">{{ templateMeta.updatedAt }}</span>
           </div>
-          <div class="info-item">
-            <span class="info-label">存储文件</span>
-            <span class="info-val mono text-xs">routing_templates.json</span>
+          <div class="meta-item">
+            <span class="meta-lbl">存储文件</span>
+            <span class="meta-val mono">routing_templates.json</span>
           </div>
         </div>
       </section>
