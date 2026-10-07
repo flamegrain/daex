@@ -43,7 +43,12 @@ type ConfigRouteRule struct {
 
 func parseDaeConfigToModel(text string) DaeConfigModel {
 	model := DaeConfigModel{
-		Globals: make(map[string]string),
+		Globals:       make(map[string]string),
+		Subscriptions: []ConfigSubItem{},
+		Nodes:         []ConfigNodeItem{},
+		Groups:        []ConfigGroupItem{},
+		RoutingRules:  []ConfigRouteRule{},
+		RawOtherLines: []string{},
 	}
 
 	lines := strings.Split(text, "\n")

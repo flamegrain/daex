@@ -31,6 +31,23 @@ import (
 
 var version = "dev"
 
+const defaultBlankDaeConfig = `# dae 配置文件方案
+global {
+    lan_interface: eth0
+    wan_interface: auto
+    auto_config_kernel_parameter: true
+}
+
+node {
+}
+
+group {
+}
+
+routing {
+}
+`
+
 type Options struct {
 	Listen     string
 	DaeBin     string
@@ -323,6 +340,9 @@ func main() {
 	flag.StringVar(&o.BackupDir, "backup-dir", envOr("DAE_BACKUP_DIR", ""), "directory to store backups (defaults to <config_dir>/backups)")
 	flag.BoolVar(&allowSystemConfig, "allow-system-config", false, "allow using a config under "+systemConfigDir+" (production only)")
 	flag.Parse()
+	if abs, err := filepath.Abs(o.DaeConfig); err == nil {
+		o.DaeConfig = abs
+	}
 
 	if err := checkConfigPath(o.DaeConfig, allowSystemConfig); err != nil {
 		log.Fatalf("refusing to start: %v", err)
@@ -482,9 +502,8 @@ func main() {
 
 		content := req.Content
 		if strings.TrimSpace(content) == "" {
-			// Copy from current active config as base template
-			b, _ := os.ReadFile(o.DaeConfig)
-			content = string(b)
+			// 新建配置使用干净的初始空白模板：节点、策略组与代理规则等均为空白
+			content = defaultBlankDaeConfig
 		}
 
 		valid, msg := validateDaeConfig(r.Context(), o.DaeBin, content)
@@ -956,21 +975,23 @@ func envOr(k, def string) string {
 }
 
 func resolveProfilePath(activeConfig, name string) string {
+	if abs, err := filepath.Abs(activeConfig); err == nil {
+		activeConfig = abs
+	}
 	name = filepath.Base(name)
 	if name == filepath.Base(activeConfig) {
 		return activeConfig
 	}
 	cfgDir := filepath.Dir(activeConfig)
 	subConfigsDir := filepath.Join(cfgDir, "configs")
-	target := filepath.Join(subConfigsDir, name)
-	if _, err := os.Stat(target); err == nil {
-		return target
-	}
-	// Fallback to parent dir or direct name in subConfigs
-	return target
+	_ = os.MkdirAll(subConfigsDir, 0700)
+	return filepath.Join(subConfigsDir, name)
 }
 
 func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
+	if abs, err := filepath.Abs(activeConfig); err == nil {
+		activeConfig = abs
+	}
 	var list []ConfigProfile
 	seen := make(map[string]bool)
 

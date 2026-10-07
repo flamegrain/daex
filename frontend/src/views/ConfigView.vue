@@ -75,6 +75,7 @@ interface DaeConfigModel {
   groups: ConfigGroupItem[]
   routingRules: ConfigRouteRule[]
   rawDnsBlock: string
+  rawOtherLines?: string[]
 }
 
 type Mode = 'form' | 'code'
@@ -265,9 +266,19 @@ async function loadConfig(profileName?: string) {
       validateContent(data.content, false)
     }
     if (resModel.ok) {
-      configModel.value = await resModel.json()
+      const m = await resModel.json()
+      configModel.value = {
+        globals: m.globals || {},
+        subscriptions: m.subscriptions || [],
+        nodes: m.nodes || [],
+        groups: m.groups || [],
+        routingRules: m.routingRules || [],
+        rawDnsBlock: m.rawDnsBlock || '',
+        rawOtherLines: m.rawOtherLines || []
+      }
     }
     await fetchConfigProfiles()
+    isDirty.value = false
   } catch (err: any) {
     alert('加载配置失败: ' + err.message)
   } finally {
@@ -318,21 +329,24 @@ function openCreateProfileModal() {
 }
 
 async function createNewProfile() {
-  const name = newProfileName.value.trim()
+  let name = newProfileName.value.trim()
   if (!name) {
     alert('请输入配置文件名称')
     return
+  }
+  if (!name.endsWith('.dae')) {
+    name += '.dae'
   }
   try {
     const res = await fetch('/api/configs/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, content: configContent.value })
+      body: JSON.stringify({ name, content: '' })
     })
     const data = await res.json()
     if (res.ok) {
       showNewProfileModal.value = false
-      alert(`配置文件 [${data.name}] 创建成功！`)
+      alert(`配置文件 [${data.name}] 创建成功！\n节点、策略组与分流规则均为初始空白状态。`)
       await fetchConfigProfiles()
       await handleSelectProfile(data.name)
     } else {
@@ -967,7 +981,16 @@ onMounted(() => {
             </button>
           </div>
 
-          <div class="cards-grid">
+          <div v-if="configModel.nodes.length === 0" class="empty-state-box">
+            <Server class="empty-icon" :size="36" />
+            <div class="empty-text">当前配置文件中暂无代理节点 (node)</div>
+            <p class="empty-subtext">你可以点击下方按钮添加节点，或在顶部切换其他配置文件</p>
+            <button class="btn btn-primary btn-sm" @click="openAddNode">
+              <Plus :size="13" /> 添加新节点
+            </button>
+          </div>
+
+          <div v-else class="cards-grid">
             <div v-for="node in configModel.nodes" :key="node.key" class="item-card">
               <div class="card-top">
                 <span class="proto-badge">{{ node.protocol || 'NODE' }}</span>
@@ -1007,7 +1030,16 @@ onMounted(() => {
             </button>
           </div>
 
-          <div class="cards-grid">
+          <div v-if="configModel.groups.length === 0" class="empty-state-box">
+            <Layers class="empty-icon" :size="36" />
+            <div class="empty-text">当前配置文件中暂无策略组 (group)</div>
+            <p class="empty-subtext">定义分组策略与过滤规则，聚合节点出站流量</p>
+            <button class="btn btn-primary btn-sm" @click="openAddGroup">
+              <Plus :size="13" /> 添加策略组
+            </button>
+          </div>
+
+          <div v-else class="cards-grid">
             <div v-for="group in configModel.groups" :key="group.name" class="item-card group-card">
               <div class="card-top">
                 <span class="group-badge">Group</span>
@@ -1051,7 +1083,16 @@ onMounted(() => {
             </button>
           </div>
 
-          <div class="rule-table-wrap">
+          <div v-if="configModel.routingRules.length === 0" class="empty-state-box">
+            <GitFork class="empty-icon" :size="36" />
+            <div class="empty-text">当前配置文件中暂无分流规则 (routing)</div>
+            <p class="empty-subtext">设置域名、IP、端口等分流匹配条件与出站动作</p>
+            <button class="btn btn-primary btn-sm" @click="openAddRoute">
+              <Plus :size="13" /> 添加路由规则
+            </button>
+          </div>
+
+          <div v-else class="rule-table-wrap">
             <table class="rule-table">
               <thead>
                 <tr>
@@ -1158,7 +1199,16 @@ onMounted(() => {
             </button>
           </div>
 
-          <div class="cards-grid">
+          <div v-if="configModel.subscriptions.length === 0" class="empty-state-box">
+            <Download class="empty-icon" :size="36" />
+            <div class="empty-text">当前配置文件中暂无订阅源 (subscription)</div>
+            <p class="empty-subtext">配置远程订阅链接，可自动在策略组中过滤提取节点</p>
+            <button class="btn btn-primary btn-sm" @click="openAddSub">
+              <Plus :size="13" /> 添加订阅
+            </button>
+          </div>
+
+          <div v-else class="cards-grid">
             <div v-for="sub in configModel.subscriptions" :key="sub.tag" class="item-card">
               <div class="card-top">
                 <span class="sub-badge">Sub</span>
@@ -2135,6 +2185,38 @@ onMounted(() => {
   padding: 30px;
   color: #64748b;
   font-size: 13px;
+}
+
+.empty-state-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px dashed #334155;
+  border-radius: 8px;
+  text-align: center;
+  margin: 12px 0;
+}
+
+.empty-icon {
+  color: #64748b;
+  margin-bottom: 12px;
+}
+
+.empty-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #cbd5e1;
+  margin-bottom: 6px;
+}
+
+.empty-subtext {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 16px;
+  max-width: 360px;
 }
 
 .truncate {
