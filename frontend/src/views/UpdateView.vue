@@ -15,7 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   ShieldCheck,
-  HardDrive
+  HardDrive,
+  Sparkles
 } from 'lucide-vue-next'
 import { t } from '../composables/useSettings'
 
@@ -52,7 +53,14 @@ const loading = ref(true)
 const updatingDae = ref(false)
 const updatingRules = ref(false)
 const updatingSingleRule = ref<string | null>(null)
+const updatingTemplates = ref(false)
 const showChangelog = ref(true)
+
+const templateMeta = ref({
+  version: '2026.10.07',
+  updatedAt: '-',
+  count: 12
+})
 
 const overview = ref<UpdateOverview>({
   dae: {
@@ -170,8 +178,44 @@ function updateSingle(name: string) {
   triggerRulesUpdate([name])
 }
 
+async function fetchTemplateInfo() {
+  try {
+    const res = await fetch('/api/routing/templates')
+    if (res.ok) {
+      const data = await res.json()
+      templateMeta.value = {
+        version: data.version || '2026.10.07',
+        updatedAt: data.updatedAt || '-',
+        count: data.templates?.length || 0
+      }
+    }
+  } catch (e) {
+    console.error('Fetch template info error:', e)
+  }
+}
+
+async function triggerTemplatesUpdate() {
+  updatingTemplates.value = true
+  executionLogs.value = [`[${new Date().toLocaleTimeString()}] 🚀 启动分流规则预设模板库更新任务...`]
+  try {
+    const res = await fetch('/api/routing/templates/update', { method: 'POST' })
+    const data = await res.json()
+    if (data.logs) {
+      executionLogs.value = data.logs
+    }
+    if (res.ok && data.success) {
+      await fetchTemplateInfo()
+    }
+  } catch (err: any) {
+    executionLogs.value.push(`❌ 更新模板任务请求失败: ${err.message}`)
+  } finally {
+    updatingTemplates.value = false
+  }
+}
+
 onMounted(() => {
   fetchUpdateCheck()
+  fetchTemplateInfo()
 })
 </script>
 
@@ -349,7 +393,49 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- Section 3: Execution Live Log Console -->
+      <!-- Section 3: Routing Presets Templates -->
+      <section class="update-card">
+        <div class="card-top">
+          <div class="card-title">
+            <Sparkles :size="18" class="card-icon tmpl-icon" />
+            <div>
+              <h3>分流规则预设模板库</h3>
+              <p class="card-sub">用于分流规则可视化配置的官方常用场景模板与最佳实践规范集合</p>
+            </div>
+          </div>
+
+          <button
+            class="action-btn secondary"
+            :disabled="updatingTemplates"
+            @click="triggerTemplatesUpdate"
+            title="从服务端同步最新分流预设模板"
+          >
+            <DownloadCloud :size="14" :class="{ spin: updatingTemplates }" />
+            <span>{{ updatingTemplates ? '正在更新模板库...' : '一键更新模板库' }}</span>
+          </button>
+        </div>
+
+        <div class="card-grid">
+          <div class="info-item">
+            <span class="info-label">当前版本</span>
+            <span class="info-val">v{{ templateMeta.version }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">包含模板</span>
+            <span class="info-val">{{ templateMeta.count }} 个精选场景模板</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">最近更新</span>
+            <span class="info-val">{{ templateMeta.updatedAt }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">存储文件</span>
+            <span class="info-val mono text-xs">routing_templates.json</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 4: Execution Live Log Console -->
       <section class="update-card console-card">
         <div class="card-top">
           <div class="card-title">
@@ -512,6 +598,9 @@ onMounted(() => {
 }
 .card-icon.rules-icon {
   color: #10b981;
+}
+.card-icon.tmpl-icon {
+  color: #f59e0b;
 }
 .card-icon.log-icon {
   color: #a855f7;

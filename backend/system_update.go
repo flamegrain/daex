@@ -57,6 +57,7 @@ type RuleFileInfo struct {
 type UpdateOverviewResponse struct {
 	Dae       DaeProgramInfo          `json:"dae"`
 	Rules     map[string]RuleFileInfo `json:"rules"`
+	Templates *RoutingTemplateConfig  `json:"templates,omitempty"`
 	CheckedAt string                  `json:"checkedAt"`
 }
 
@@ -247,6 +248,7 @@ func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewRespon
 	res := UpdateOverviewResponse{
 		Dae:       daeInfo,
 		Rules:     rulesMap,
+		Templates: cachedTemplateCfg,
 		CheckedAt: time.Now().Format("2006-01-02 15:04:05"),
 	}
 	cachedUpdate = &res

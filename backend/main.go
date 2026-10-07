@@ -462,6 +462,10 @@ func main() {
 		writeJSON(w, http.StatusOK, traceResult)
 	})
 
+	// 2.3.1 Routing preset templates config & update
+	mux.HandleFunc("GET /api/routing/templates", handleGetRoutingTemplates(o))
+	mux.HandleFunc("POST /api/routing/templates/update", handleUpdateRoutingTemplates(o))
+
 	// 2.4 System update checks and actions
 	mux.HandleFunc("GET /api/update/check", func(w http.ResponseWriter, r *http.Request) {
 		res, err := checkSystemUpdate(r.Context(), o.DaeBin)

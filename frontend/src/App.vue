@@ -10,16 +10,18 @@ import {
   CircleDot,
   RefreshCw,
   Cpu,
-  ArrowUpCircle
+  ArrowUpCircle,
+  GitFork
 } from 'lucide-vue-next'
 import ConfigView from './views/ConfigView.vue'
+import RoutingView from './views/RoutingView.vue'
 import DashboardView from './views/DashboardView.vue'
 import NodesView from './views/NodesView.vue'
 import UpdateView from './views/UpdateView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { t, theme, applyTheme } from './composables/useSettings'
 
-type Tab = 'home' | 'config' | 'nodes' | 'logs' | 'service' | 'update' | 'settings'
+type Tab = 'home' | 'config' | 'routing' | 'nodes' | 'logs' | 'service' | 'update' | 'settings'
 
 const activeTab = ref<Tab>('home')
 const daeStatus = ref<Record<string, any> | null>(null)
@@ -85,6 +87,15 @@ onMounted(() => {
           <FileText class="nav-icon" :size="18" />
           <span>{{ t('nav.config') }}</span>
           <span class="badge">mock</span>
+        </button>
+
+        <button
+          class="nav-item"
+          :class="{ active: activeTab === 'routing' }"
+          @click="activeTab = 'routing'"
+        >
+          <GitFork class="nav-icon" :size="18" />
+          <span>{{ t('nav.routing') }}</span>
         </button>
 
         <button
@@ -183,6 +194,7 @@ onMounted(() => {
     <main class="workspace">
       <DashboardView v-if="activeTab === 'home'" />
       <ConfigView v-else-if="activeTab === 'config'" />
+      <RoutingView v-else-if="activeTab === 'routing'" />
       <NodesView v-else-if="activeTab === 'nodes'" />
 
       <div v-else-if="activeTab === 'logs'" class="placeholder-view">
