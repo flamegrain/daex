@@ -28,12 +28,6 @@ interface NodeItem {
   latency: number
 }
 
-interface CountryStat {
-  name: string
-  count: number
-  flag: string
-}
-
 interface TrafficPoint {
   timestamp: number
   uploadBps: number
@@ -42,11 +36,10 @@ interface TrafficPoint {
 
 const dashboardData = ref<any>(null)
 const loading = ref(true)
+const pingingNodes = ref(false)
 const speedChartEl = ref<HTMLDivElement | null>(null)
-const countryChartEl = ref<HTMLDivElement | null>(null)
 
 let speedChart: echarts.ECharts | null = null
-let countryChart: echarts.ECharts | null = null
 let timer: any = null
 
 function formatBps(bytesPerSec: number) {
@@ -80,20 +73,29 @@ async function fetchDashboard() {
   }
 }
 
+async function handleQuickPingAll() {
+  pingingNodes.value = true
+  try {
+    const res = await fetch('/api/nodes/ping', { method: 'POST' })
+    if (res.ok) {
+      await fetchDashboard()
+    }
+  } catch (e) {
+    console.error('Quick ping error:', e)
+  } finally {
+    pingingNodes.value = false
+  }
+}
+
 function initCharts() {
   if (speedChartEl.value) {
     speedChart = echarts.init(speedChartEl.value)
   }
-  if (countryChartEl.value) {
-    countryChart = echarts.init(countryChartEl.value)
-  }
-
   window.addEventListener('resize', handleResize)
 }
 
 function handleResize() {
   speedChart?.resize()
-  countryChart?.resize()
 }
 
 function updateCharts(data: any) {
@@ -162,82 +164,32 @@ function updateCharts(data: any) {
           type: 'line',
           smooth: true,
           showSymbol: false,
-          itemStyle: { color: '#0284c7' },
+          data: downData,
+          lineStyle: { width: 2, color: '#38bdf8' },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: isLight ? 'rgba(2, 132, 199, 0.25)' : 'rgba(56, 189, 248, 0.35)' },
-              { offset: 1, color: isLight ? 'rgba(2, 132, 199, 0.0)' : 'rgba(56, 189, 248, 0.0)' }
+              { offset: 0, color: 'rgba(56, 189, 248, 0.35)' },
+              { offset: 1, color: 'rgba(56, 189, 248, 0.00)' }
             ])
-          },
-          data: downData
+          }
         },
         {
           name: '上行速率 (MB/s)',
           type: 'line',
           smooth: true,
           showSymbol: false,
-          itemStyle: { color: '#a855f7' },
+          data: upData,
+          lineStyle: { width: 2, color: '#10b981' },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(168, 85, 247, 0.25)' },
-              { offset: 1, color: 'rgba(168, 85, 247, 0.0)' }
+              { offset: 0, color: 'rgba(16, 185, 129, 0.35)' },
+              { offset: 1, color: 'rgba(16, 185, 129, 0.00)' }
             ])
-          },
-          data: upData
+          }
         }
       ]
     }
     speedChart.setOption(speedOption)
-  }
-
-  // 2. Donut/Pie chart for Country Distribution
-  if (countryChart && data.countries) {
-    const pieData = data.countries.map((c: CountryStat) => ({
-      name: `${c.flag} ${c.name}`,
-      value: c.count
-    }))
-
-    const countryOption: echarts.EChartsOption = {
-      backgroundColor: 'transparent',
-      tooltip: {
-        trigger: 'item',
-        backgroundColor: isLight ? '#ffffff' : '#0f172a',
-        borderColor: isLight ? '#e2e8f0' : '#1e293b',
-        textStyle: { color: isLight ? '#0f172a' : '#e2e8f0', fontSize: 12 },
-        formatter: '{b}: <b>{c} 个节点</b> ({d}%)'
-      },
-      legend: {
-        orient: 'vertical',
-        right: '5%',
-        top: 'center',
-        textStyle: { color: isLight ? '#475569' : '#94a3b8', fontSize: 11 }
-      },
-      series: [
-        {
-          name: '国家与地区分布',
-          type: 'pie',
-          radius: ['45%', '75%'],
-          center: ['35%', '50%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 6,
-            borderColor: isLight ? '#ffffff' : '#0b1120',
-            borderWidth: 2
-          },
-          label: { show: false },
-          emphasis: {
-            label: {
-              show: true,
-              fontSize: 12,
-              fontWeight: 'bold',
-              color: isLight ? '#0f172a' : '#f8fafc'
-            }
-          },
-          data: pieData
-        }
-      ]
-    }
-    countryChart.setOption(countryOption)
   }
 }
 
@@ -259,7 +211,6 @@ onUnmounted(() => {
   if (timer) clearInterval(timer)
   window.removeEventListener('resize', handleResize)
   speedChart?.dispose()
-  countryChart?.dispose()
 })
 </script>
 
@@ -268,8 +219,8 @@ onUnmounted(() => {
     <!-- Header Summary -->
     <header class="dash-header">
       <div>
-        <h2 class="title">网关运行大盘</h2>
-        <p class="subtitle">基于 eBPF 的轻量路由核心，安全沙箱模式 (Mock 数据流)</p>
+        <h2 class="title">网关运行首页</h2>
+        <p class="subtitle">基于内核态 eBPF 的轻量路由核心与流量监控面板</p>
       </div>
       <button class="refresh-pill" @click="fetchDashboard">
         <RefreshCw :size="13" />
@@ -346,38 +297,88 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- Charts Row -->
+    <!-- Charts & Nodes Summary Row -->
     <section class="charts-grid">
-      <!-- Speed Trend Chart -->
+      <!-- Speed Trend Chart (Left) -->
       <div class="chart-card speed-card">
         <div class="card-head">
           <div class="head-title">
             <Activity class="h-icon" :size="16" />
-            <span>实时数据传输速率 (Throughput Trend)</span>
+            <span>实时数据传输速率</span>
           </div>
-          <span class="tag live">● 实时推流 (2s)</span>
+          <span class="tag live">● 实时推流</span>
         </div>
         <div class="chart-container" ref="speedChartEl"></div>
       </div>
 
-      <!-- Country Breakdown Chart -->
-      <div class="chart-card country-card">
+      <!-- Node Summary, Country and Latency Results (Right) -->
+      <div class="chart-card node-summary-card">
         <div class="card-head">
           <div class="head-title">
-            <Globe2 class="h-icon" :size="16" />
-            <span>节点国家与地区分布 (Geo Distribution)</span>
+            <Server class="h-icon" :size="16" />
+            <span>节点列表与测速状态</span>
+          </div>
+          <button
+            class="btn-ping-quick"
+            :disabled="pingingNodes"
+            @click="handleQuickPingAll"
+            title="一键测速全部可用节点"
+          >
+            <Zap :size="12" :class="{ spin: pingingNodes }" />
+            <span>{{ pingingNodes ? '测速中...' : '快速测速' }}</span>
+          </button>
+        </div>
+
+        <div class="node-compact-list">
+          <div
+            v-for="node in dashboardData?.nodes"
+            :key="node.key"
+            class="compact-node-item"
+            :class="{ active: node.active }"
+          >
+            <!-- Country & Flag -->
+            <div class="node-item-country">
+              <span class="flag-icon">{{ node.flag }}</span>
+              <span class="country-name">{{ node.country }}</span>
+            </div>
+
+            <!-- Node Name & Address -->
+            <div class="node-item-info">
+              <div class="node-item-title">
+                <span class="node-name-text" :title="node.name">{{ node.name }}</span>
+                <span class="proto-badge">{{ node.protocol }}</span>
+              </div>
+              <span class="node-addr-text mono" :title="`${node.address}:${node.port}`">
+                {{ node.address }}:{{ node.port }}
+              </span>
+            </div>
+
+            <!-- Ping Latency & State -->
+            <div class="node-item-status">
+              <span
+                class="latency-pill"
+                :class="{
+                  fast: node.latency < 50,
+                  medium: node.latency >= 50 && node.latency < 100,
+                  slow: node.latency >= 100
+                }"
+              >
+                <span class="latency-dot"></span>
+                {{ node.latency }} ms
+              </span>
+              <span v-if="node.active" class="active-tag">生效中</span>
+            </div>
           </div>
         </div>
-        <div class="chart-container" ref="countryChartEl"></div>
       </div>
     </section>
 
-    <!-- Active Nodes Table -->
+    <!-- Active Nodes Full Table -->
     <section class="nodes-section">
       <div class="section-head">
         <div class="head-title">
           <Layers class="h-icon" :size="16" />
-          <span>生效与可用节点概览 (Active Nodes Pool)</span>
+          <span>生效与可用节点详细列表</span>
         </div>
         <span class="badge-mock">沙箱假数据安全展示</span>
       </div>
@@ -388,11 +389,11 @@ onUnmounted(() => {
             <tr>
               <th style="width: 90px">状态</th>
               <th style="width: 110px">国家/地区</th>
-              <th style="width: 25%">节点名称 (Alias)</th>
+              <th style="width: 25%">节点名称</th>
               <th style="width: 80px">协议</th>
-              <th style="width: 30%">目标地址 (Address)</th>
+              <th style="width: 30%">目标地址</th>
               <th style="width: 70px">端口</th>
-              <th style="width: 90px">延迟 (Ping)</th>
+              <th style="width: 90px">测速延迟</th>
             </tr>
           </thead>
           <tbody>
@@ -439,70 +440,67 @@ onUnmounted(() => {
 .home-dashboard {
   height: 100%;
   overflow-y: auto;
-  overflow-x: hidden;
-  padding: 24px;
-  background: var(--bg-main, #090d16);
-  color: var(--text-main, #f8fafc);
+  padding: 20px 24px;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 100%;
-  box-sizing: border-box;
 }
 
+/* Header */
 .dash-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.dash-header .title {
+.title {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text-main, #f8fafc);
 }
 
-.dash-header .subtitle {
+.subtitle {
   margin: 4px 0 0;
   font-size: 13px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, #94a3b8);
 }
 
 .refresh-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-card, #1e293b);
-  border: 1px solid var(--border-color, #334155);
-  color: var(--text-muted, #94a3b8);
-  padding: 6px 12px;
+  padding: 6px 14px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
   border-radius: 20px;
+  color: var(--text-muted, #94a3b8);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
+
 .refresh-pill:hover {
-  background: var(--border-color, #334155);
-  color: var(--text-main, #fff);
+  background: var(--bg-input, #1e293b);
+  color: var(--text-main, #f8fafc);
+  border-color: #0284c7;
 }
 
-/* Metrics Grid */
+/* Top Metrics Cards */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 16px;
 }
 
 .metric-card {
   background: var(--bg-card, #0f172a);
   border: 1px solid var(--border-color, #1e293b);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  transition: background-color 0.2s, border-color 0.2s;
+  gap: 8px;
 }
 
 .metric-top {
@@ -513,7 +511,7 @@ onUnmounted(() => {
 
 .m-label {
   font-size: 12px;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, #94a3b8);
   font-weight: 500;
 }
 
@@ -525,75 +523,82 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
 }
+
 .icon-circle.down {
-  background: #0284c722;
-  color: #0284c7;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
 }
+
 .icon-circle.up {
-  background: #7e22ce22;
-  color: #9333ea;
-}
-.icon-circle.status {
-  background: #064e3b22;
+  background: rgba(16, 185, 129, 0.12);
   color: #10b981;
 }
+
+.icon-circle.status {
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
+
 .icon-circle.node {
-  background: #f59e0b22;
-  color: #d97706;
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
 }
 
 .metric-value {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text-main, #f8fafc);
-  letter-spacing: -0.5px;
 }
 
 .metric-value.active-text {
   color: #10b981;
-  font-size: 18px;
 }
 
 .metric-value .unit {
   font-size: 13px;
   font-weight: 400;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, #94a3b8);
 }
 
 .metric-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted, #64748b);
   display: flex;
   align-items: center;
   gap: 6px;
 }
+
 .metric-sub .sep {
-  color: var(--border-color, #334155);
+  opacity: 0.4;
 }
 
 /* Charts Grid */
 .charts-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 1.2fr 0.8fr;
   gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .chart-card {
   background: var(--bg-card, #0f172a);
   border: 1px solid var(--border-color, #1e293b);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 16px;
   display: flex;
   flex-direction: column;
-  height: 310px;
-  transition: background-color 0.2s, border-color 0.2s;
 }
 
 .card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .head-title {
@@ -602,7 +607,7 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-main, #e2e8f0);
+  color: var(--text-main, #f8fafc);
 }
 
 .h-icon {
@@ -612,169 +617,319 @@ onUnmounted(() => {
 .tag.live {
   font-size: 11px;
   color: #10b981;
-  background: #064e3b22;
+  background: rgba(16, 185, 129, 0.1);
   padding: 2px 8px;
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .chart-container {
-  flex: 1;
+  height: 240px;
   width: 100%;
-  height: 100%;
 }
 
-/* Nodes Table Section */
+/* Right Side: Node Summary Compact List */
+.btn-ping-quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+  border: 1px solid rgba(2, 132, 199, 0.25);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-ping-quick:hover:not(:disabled) {
+  background: #0284c7;
+  color: #fff;
+}
+
+.node-compact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.compact-node-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.compact-node-item:hover {
+  border-color: #0284c7;
+  background: var(--bg-input, #1e293b);
+}
+
+.compact-node-item.active {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.node-item-country {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 50px;
+  gap: 2px;
+}
+
+.flag-icon {
+  font-size: 18px;
+}
+
+.country-name {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+}
+
+.node-item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.node-item-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.node-name-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.proto-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+  text-transform: uppercase;
+}
+
+.node-addr-text {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-item-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.latency-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--bg-card, #0f172a);
+}
+
+.latency-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.latency-pill.fast {
+  color: #10b981;
+}
+
+.latency-pill.fast .latency-dot {
+  background: #10b981;
+}
+
+.latency-pill.medium {
+  color: #f59e0b;
+}
+
+.latency-pill.medium .latency-dot {
+  background: #f59e0b;
+}
+
+.latency-pill.slow {
+  color: #ef4444;
+}
+
+.latency-pill.slow .latency-dot {
+  background: #ef4444;
+}
+
+.active-tag {
+  font-size: 10px;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* Bottom Nodes Full Table */
 .nodes-section {
   background: var(--bg-card, #0f172a);
   border: 1px solid var(--border-color, #1e293b);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  transition: background-color 0.2s, border-color 0.2s;
 }
 
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 14px;
 }
 
 .badge-mock {
   font-size: 11px;
-  background: var(--bg-input, #1e293b);
-  border: 1px solid var(--border-color, #334155);
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, #64748b);
+  background: var(--bg-input, #090d16);
   padding: 2px 8px;
   border-radius: 4px;
 }
 
 .table-wrapper {
-  width: 100%;
-  overflow-x: hidden;
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #1e293b);
+  overflow-x: auto;
 }
 
 .nodes-table {
   width: 100%;
-  table-layout: fixed;
   border-collapse: collapse;
-  font-size: 12px;
-  background: var(--bg-card, #0f172a);
+  font-size: 13px;
 }
 
 .nodes-table th {
   text-align: left;
-  padding: 10px;
-  color: var(--text-muted, #64748b);
-  background: var(--bg-input, #0b1120);
-  border-bottom: 1px solid var(--border-color, #1e293b);
+  padding: 10px 12px;
+  color: var(--text-muted, #94a3b8);
   font-weight: 500;
-  white-space: nowrap;
+  border-bottom: 1px solid var(--border-color, #1e293b);
 }
 
 .nodes-table td {
-  padding: 10px;
-  border-bottom: 1px solid var(--border-color, #1e293b55);
-  color: var(--text-main, #cbd5e1);
-  vertical-align: middle;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+  color: var(--text-main, #f8fafc);
 }
 
-.truncate-text {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.row-active {
-  background: rgba(2, 132, 199, 0.06);
+.nodes-table tr.row-active {
+  background: rgba(16, 185, 129, 0.03);
 }
 
 .active-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(16, 185, 129, 0.15);
-  color: #059669;
+  font-size: 11px;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
   padding: 2px 8px;
   border-radius: 12px;
-  font-size: 11px;
   font-weight: 500;
-  white-space: nowrap;
 }
 
 .standby-pill {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-muted, #64748b);
   font-size: 11px;
-  padding: 2px 6px;
-  white-space: nowrap;
+  color: var(--text-muted, #64748b);
+  background: var(--bg-input, #090d16);
+  padding: 2px 8px;
+  border-radius: 12px;
 }
 
 .country-cell {
   display: flex;
   align-items: center;
   gap: 6px;
-  overflow: hidden;
 }
 
-.country-cell .flag {
+.flag {
   font-size: 16px;
-  flex-shrink: 0;
 }
 
-.name-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow: hidden;
+.name-cell b {
+  display: block;
 }
 
 .key-tag {
-  font-family: monospace;
-  font-size: 10px;
+  display: block;
+  font-size: 11px;
   color: var(--text-muted, #64748b);
 }
 
 .proto-tag {
-  background: var(--bg-input, #1e293b);
-  color: #0284c7;
-  border: 1px solid var(--border-color, #334155);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 600;
-  font-size: 10px;
-  font-family: monospace;
   display: inline-block;
-  white-space: nowrap;
-}
-
-.addr-cell {
-  overflow: hidden;
-  color: var(--text-muted, #94a3b8);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .latency {
   font-family: monospace;
+  font-size: 12px;
   font-weight: 600;
-  white-space: nowrap;
 }
+
 .latency.fast {
   color: #10b981;
 }
+
 .latency.medium {
-  color: #d97706;
+  color: #f59e0b;
 }
+
 .latency.slow {
   color: #ef4444;
+}
+
+.mono {
+  font-family: monospace;
+}
+
+.truncate-text {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

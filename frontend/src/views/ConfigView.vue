@@ -349,7 +349,7 @@ async function handleSelectProfile(name: string) {
 
 async function activateSelectedProfile(name?: string) {
   const target = name || currentSelectedConfig.value
-  if (!confirm(`确认使配置文件 [${target}] 生效到主 dae 服务吗？\n生效后系统将自动重载 (systemctl reload dae) 网络配置。`)) {
+  if (!confirm(`确认使配置文件 [${target}] 生效到主 dae 服务吗？\n生效后系统将自动重载网络配置。`)) {
     return
   }
   activatingConfig.value = true
@@ -1459,7 +1459,7 @@ onMounted(() => {
               <ShieldCheck class="banner-icon" :size="18" />
               <div class="banner-text">
                 <span class="banner-title">分流规则逻辑健康</span>
-                <span class="banner-sub">共 {{ configModel.routingRules.length }} 条规则，未检测到阴影规则 (Shadowed)、重复规则或 Fallback 顺序错误。所有规则将按顺序执行。</span>
+                <span class="banner-sub">共 {{ configModel.routingRules.length }} 条规则，未检测到死规则遮蔽、重复规则或兜底顺序错误。所有规则将按顺序执行。</span>
               </div>
             </div>
 
@@ -1556,8 +1556,8 @@ onMounted(() => {
               <thead>
                 <tr>
                   <th style="width: 60px">#</th>
-                  <th>匹配条件 (Condition)</th>
-                  <th style="width: 150px">动作出口 (Target)</th>
+                  <th>匹配条件</th>
+                  <th style="width: 150px">动作出口</th>
                   <th style="width: 110px">状态健康</th>
                   <th style="width: 160px; text-align: right">操作与排序</th>
                 </tr>
@@ -1577,7 +1577,7 @@ onMounted(() => {
                     <span class="idx-num">{{ idx + 1 }}</span>
                   </td>
                   <td class="mono cond-cell">
-                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">兜底路由 (fallback)</span>
+                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">兜底规则 (固定于末尾)</span>
                     <span v-else class="rule-condition-text">{{ rule.condition }}</span>
                   </td>
                   <td>
@@ -1827,7 +1827,7 @@ onMounted(() => {
             <input v-model="editingGroup.name" :disabled="groupModalMode === 'edit'" placeholder="group_name" />
           </div>
           <div class="field">
-            <label>出站策略 (policy)</label>
+            <label>出站策略</label>
             <select v-model="editingGroup.policy">
               <option value="min_moving_avg">min_moving_avg (最低滑动平均延迟)</option>
               <option value="min_avg10">min_avg10 (近10次最低均值)</option>
@@ -2024,11 +2024,11 @@ onMounted(() => {
                   class="builder-mod-select"
                   @change="updateConditionFromBuilder"
                 >
-                  <option value="geosite">geosite 规则库 (推荐)</option>
-                  <option value="suffix">域名后缀 (suffix)</option>
-                  <option value="keyword">包含关键字 (keyword)</option>
-                  <option value="full">精准全域名 (full)</option>
-                  <option value="regex">正则表达式 (regex)</option>
+                  <option value="geosite">预置规则库 (推荐)</option>
+                  <option value="suffix">域名后缀</option>
+                  <option value="keyword">包含关键字</option>
+                  <option value="full">精准全域名</option>
+                  <option value="regex">正则表达式</option>
                   <option value="none">默认泛域名</option>
                 </select>
 
@@ -2126,14 +2126,14 @@ onMounted(() => {
 
           <!-- Target Selection -->
           <div class="field">
-            <label>目标动作 (Target / 出口分流)</label>
+            <label>动作出口</label>
             <select v-model="editingRoute.target" class="target-select">
-              <optgroup label="内置直连与阻断动作 (Built-in Actions)">
+              <optgroup label="内置直连与阻断动作">
                 <option value="direct">direct (直接放行 / 默认直连)</option>
                 <option value="must_direct">must_direct (强制直连 / 避开本地 DNS 劫持)</option>
                 <option value="block">block (阻断连接 / 丢弃数据包)</option>
               </optgroup>
-              <optgroup label="出站策略组 (Proxy Groups)">
+              <optgroup label="出站策略组">
                 <option v-for="g in configModel.groups" :key="g.name" :value="g.name">
                   {{ g.name }} (出站组策略: {{ g.policy }})
                 </option>
@@ -2357,7 +2357,7 @@ onMounted(() => {
                   <tr>
                     <th style="width: 38px"></th>
                     <th style="width: 80px">协议</th>
-                    <th>节点名称 (Alias)</th>
+                    <th>节点名称</th>
                     <th>服务器地址</th>
                     <th style="width: 90px">地区</th>
                   </tr>

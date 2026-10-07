@@ -358,11 +358,11 @@ onUnmounted(() => {
         <span class="pill-label">模块分类:</span>
         <select v-model="selectedTag" class="tag-select">
           <option value="all">全部模块</option>
-          <option value="routing">分流规则 (routing)</option>
-          <option value="dns">DNS 解析 (dns)</option>
-          <option value="ebpf">内核探针 (ebpf)</option>
-          <option value="proxy">代理策略组 (proxy)</option>
-          <option value="system">系统核心 (system)</option>
+          <option value="routing">分流规则</option>
+          <option value="dns">域名解析</option>
+          <option value="ebpf">内核探针</option>
+          <option value="proxy">代理策略</option>
+          <option value="system">系统核心</option>
         </select>
       </div>
 

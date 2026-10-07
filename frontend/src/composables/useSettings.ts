@@ -30,7 +30,7 @@ const messages: Record<LangType, Record<string, string>> = {
     'nav.section.overview': '概览分析',
     'nav.section.core': '核心功能',
     'nav.section.system': '系统状态',
-    'nav.home': '首页大盘',
+    'nav.home': '首页',
     'nav.config': '配置管理',
     'nav.routing': '分流规则',
     'nav.nodes': '节点与策略',

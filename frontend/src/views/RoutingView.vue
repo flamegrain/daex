@@ -164,14 +164,30 @@ const filteredTemplates = computed(() => {
   return list
 })
 
+// Helper: Check if rule is local private network bypass
+function isPrivateBypassRule(r: ConfigRouteRule): boolean {
+  if (!r || !r.condition) return false
+  const c = r.condition.trim().toLowerCase()
+  return c === 'dip(geoip:private)' || (c.includes('geoip:private') && r.target === 'direct')
+}
+
+function ensurePrivateBypassOnTop() {
+  const rules = configModel.value.routingRules
+  const pIdx = rules.findIndex(isPrivateBypassRule)
+  if (pIdx > 0) {
+    const [pRule] = rules.splice(pIdx, 1)
+    rules.unshift(pRule)
+  }
+}
+
 // Load Config Profiles and Active Model
 async function fetchConfigProfiles() {
   try {
     const res = await fetch('/api/configs')
     if (res.ok) {
       const data = await res.json()
-      configProfiles.value = data.profiles || []
-      activeRunningConfig.value = data.activeName || 'config.mock.dae'
+      configProfiles.value = data.configs || data.profiles || []
+      activeRunningConfig.value = data.currentActive || data.activeName || 'config.mock.dae'
       if (!currentSelectedConfig.value && configProfiles.value.length > 0) {
         currentSelectedConfig.value = activeRunningConfig.value || configProfiles.value[0].name
       }
@@ -199,6 +215,7 @@ async function loadConfig(profileName?: string) {
         rawDnsBlock: m.rawDnsBlock || '',
         rawOtherLines: m.rawOtherLines || []
       }
+      ensurePrivateBypassOnTop()
       isDirty.value = false
     }
     await fetchConfigProfiles()
@@ -356,7 +373,15 @@ function assembleConditionFromHumanizedBuilder(): string {
   return parts.join(' && ')
 }
 
+function isRuleDraggable(r: ConfigRouteRule, idx: number): boolean {
+  if (!r || !r.condition) return false
+  if (r.condition.trim() === 'fallback') return false
+  if (idx === 0 && isPrivateBypassRule(r)) return false
+  return true
+}
+
 function openAddRuleEditor() {
+  activeTab.value = 'rules'
   editorMode.value = 'add'
   editingIndex.value = -1
   builderMode.value = 'builder'
@@ -441,7 +466,7 @@ async function saveRuleFromEditor() {
   }
 
   if (!cond || !finalTarget) {
-    alert('分流匹配条件与出口动作不能为空')
+    alert('分流匹配条件与动作出口不能为空')
     return
   }
 
@@ -451,7 +476,13 @@ async function saveRuleFromEditor() {
   }
 
   if (editorMode.value === 'add') {
-    configModel.value.routingRules.push(newRule)
+    // 自动放置在兜底规则 (fallback) 之上
+    const fbIdx = configModel.value.routingRules.findIndex(r => r.condition.trim() === 'fallback')
+    if (fbIdx >= 0) {
+      configModel.value.routingRules.splice(fbIdx, 0, newRule)
+    } else {
+      configModel.value.routingRules.push(newRule)
+    }
   } else if (editingIndex.value >= 0) {
     configModel.value.routingRules[editingIndex.value] = newRule
   }
@@ -481,7 +512,7 @@ const dragOverTargetIndex = ref<number | null>(null)
 
 function onRuleDragStart(idx: number, event: DragEvent) {
   const rule = configModel.value.routingRules[idx]
-  if (rule.condition.trim() === 'fallback') {
+  if (!isRuleDraggable(rule, idx)) {
     event.preventDefault()
     return
   }
@@ -509,9 +540,16 @@ function onRuleDrop(idx: number, event: DragEvent) {
   let to = idx
   const rules = configModel.value.routingRules
 
-  // 如果拖放到 fallback 身上，限制放在 fallback 前一位
-  if (rules[to]?.condition.trim() === 'fallback') {
-    to = Math.max(0, to - 1)
+  // 若首行为局域网私网直连，则不能拖动到首行之前（最小索引为 1）
+  const hasPrivateTop = rules.length > 0 && isPrivateBypassRule(rules[0])
+  if (hasPrivateTop) {
+    to = Math.max(1, to)
+  }
+
+  // 若末尾有 fallback 规则，则不能放置在 fallback 之后
+  const fbIdx = rules.findIndex(r => r.condition.trim() === 'fallback')
+  if (fbIdx >= 0 && to >= fbIdx) {
+    to = Math.max(hasPrivateTop ? 1 : 0, fbIdx - 1)
   }
 
   const [movedItem] = rules.splice(from, 1)
@@ -581,7 +619,7 @@ onMounted(async () => {
           <GitFork class="title-icon" :size="20" />
           <div>
             <h2>分流与路由规则管理</h2>
-            <span class="subtext">eBPF 内核级流量特征精准匹配与 First-Match-Wins 策略出口管控</span>
+            <span class="subtext">内核流量特征精准匹配与逐条优先匹配规则出口判定</span>
           </div>
         </div>
 
@@ -594,12 +632,15 @@ onMounted(async () => {
             class="profile-select"
             title="选择要配置的分流方案"
           >
+            <option v-if="configProfiles.length === 0" :value="currentSelectedConfig">
+              {{ currentSelectedConfig }}
+            </option>
             <option
               v-for="p in configProfiles"
               :key="p.name"
               :value="p.name"
             >
-              {{ p.name }} {{ p.isActive ? ' [正在生效]' : '' }}
+              {{ p.name }} {{ (p.isActive || p.name === activeRunningConfig) ? ' [正在生效]' : '' }}
             </option>
           </select>
 
@@ -678,7 +719,7 @@ onMounted(async () => {
             <ShieldCheck class="banner-icon" :size="18" />
             <div class="banner-info">
               <span class="title">分流规则完全健康 (共 {{ configModel.routingRules.length }} 条)</span>
-              <span class="desc">所有规则自上而下匹配，未检测到死规则遮蔽 (Shadowed)、重复规则或 Fallback 兜底顺序错误。</span>
+              <span class="desc">所有规则自上而下匹配，未检测到死规则遮蔽、重复规则或兜底顺序错误。</span>
             </div>
           </div>
 
@@ -822,14 +863,14 @@ onMounted(async () => {
                     <div class="ctrl-group">
                       <label class="ctrl-lbl">流量对象:</label>
                       <select v-model="item.targetType" class="form-select type-select">
-                        <option value="domain">🌐 网站域名 (domain)</option>
-                        <option value="dip">🎯 目标 IP / 网段 (dip)</option>
-                        <option value="dport">🔌 网络端口 (dport)</option>
-                        <option value="sip">💻 客户端设备 IP (sip)</option>
-                        <option value="mac">🏷️ 客户端 MAC 地址 (mac)</option>
-                        <option value="l4proto">⚡ 传输协议 (l4proto)</option>
-                        <option value="ipversion">🔢 IP 协议版本 (ipversion)</option>
-                        <option value="pname">📦 本机进程名 (pname)</option>
+                        <option value="domain">🌐 网站域名</option>
+                        <option value="dip">🎯 目标 IP 与网段</option>
+                        <option value="dport">🔌 网络端口</option>
+                        <option value="sip">💻 客户端设备 IP</option>
+                        <option value="mac">🏷️ 客户端 MAC 地址</option>
+                        <option value="l4proto">⚡ 传输协议</option>
+                        <option value="ipversion">🔢 协议版本</option>
+                        <option value="pname">📦 进程名称</option>
                       </select>
                     </div>
 
@@ -959,14 +1000,14 @@ onMounted(async () => {
             <!-- Target Selection Row -->
             <div class="target-select-row">
               <div class="form-group flex-1">
-                <label>目标动作 (Target / 出口分流)</label>
+                <label>动作出口</label>
                 <select v-model="editingRule.target" class="form-select target-select">
-                  <optgroup label="内置直连与阻断动作 (Built-in Actions)">
+                  <optgroup label="内置直连与阻断动作">
                     <option value="direct">direct (直接放行 / 常规直连)</option>
                     <option value="must_direct">must_direct (强制直连 / 避开本地 DNS 劫持)</option>
                     <option value="block">block (阻断连接 / 丢弃数据包)</option>
                   </optgroup>
-                  <optgroup label="代理策略组 (Proxy Groups)">
+                  <optgroup label="代理策略组">
                     <option v-for="g in configModel.groups" :key="g.name" :value="g.name">
                       {{ g.name }} (出站策略: {{ g.policy }})
                     </option>
@@ -1005,7 +1046,7 @@ onMounted(async () => {
         <div class="rules-table-card">
           <div class="table-card-header">
             <div class="table-title">
-              <h3>规则列表执行顺序 (自上而下 First-Match-Wins)</h3>
+              <h3>规则列表执行顺序 (自上而下逐条匹配)</h3>
               <span class="rules-count-pill">共 {{ configModel.routingRules.length }} 条规则</span>
             </div>
 
@@ -1030,9 +1071,9 @@ onMounted(async () => {
               <thead>
                 <tr>
                   <th style="width: 44px; text-align: center" title="按住手柄上下拖动">拖动</th>
-                  <th style="width: 50px"># 序号</th>
-                  <th>匹配条件 (Condition)</th>
-                  <th style="width: 170px">动作出口 (Target)</th>
+                  <th style="width: 50px">序号</th>
+                  <th>匹配条件</th>
+                  <th style="width: 170px">动作出口</th>
                   <th style="width: 130px">状态健康</th>
                   <th style="width: 140px; text-align: right">操作</th>
                 </tr>
@@ -1042,7 +1083,7 @@ onMounted(async () => {
                   v-for="(rule, idx) in configModel.routingRules"
                   :key="idx"
                   :id="`routing-table-row-${idx}`"
-                  :draggable="rule.condition !== 'fallback'"
+                  :draggable="isRuleDraggable(rule, idx)"
                   @dragstart="onRuleDragStart(idx, $event)"
                   @dragover="onRuleDragOver(idx, $event)"
                   @drop="onRuleDrop(idx, $event)"
@@ -1051,6 +1092,7 @@ onMounted(async () => {
                     'row-highlighted': highlightedRuleIndex === idx,
                     'row-dragging': draggedRuleIndex === idx,
                     'row-drag-over': dragOverTargetIndex === idx,
+                    'row-pinned-fixed': idx === 0 && isPrivateBypassRule(rule),
                     'row-fallback-fixed': rule.condition === 'fallback',
                     'row-error': routingHealthReport.ruleStatusMap[idx]?.severity === 'error',
                     'row-warning': routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'
@@ -1058,16 +1100,23 @@ onMounted(async () => {
                 >
                   <td class="drag-grip-col">
                     <div
-                      v-if="rule.condition !== 'fallback'"
-                      class="drag-handle-grip"
-                      title="按住鼠标拖拽自由上下调整优先级"
+                      v-if="idx === 0 && isPrivateBypassRule(rule)"
+                      class="drag-handle-grip disabled"
+                      title="局域网私网直连（推荐首行置顶，固定不可拖动）"
+                    >
+                      <GripVertical :size="16" />
+                    </div>
+                    <div
+                      v-else-if="rule.condition === 'fallback'"
+                      class="drag-handle-grip disabled"
+                      title="兜底规则固定于末尾，无法拖动"
                     >
                       <GripVertical :size="16" />
                     </div>
                     <div
                       v-else
-                      class="drag-handle-grip disabled"
-                      title="兜底规则固定于末尾，无法拖动"
+                      class="drag-handle-grip"
+                      title="按住鼠标拖拽自由上下调整优先级"
                     >
                       <GripVertical :size="16" />
                     </div>
@@ -1076,8 +1125,12 @@ onMounted(async () => {
                     <span class="idx-chip">{{ idx + 1 }}</span>
                   </td>
                   <td class="cond-col mono">
-                    <span v-if="rule.condition === 'fallback'" class="fallback-badge">
-                      兜底规则 (fallback - 固定于末尾)
+                    <span v-if="idx === 0 && isPrivateBypassRule(rule)" class="pinned-rule-wrap">
+                      <span class="rule-code-text">{{ rule.condition }}</span>
+                      <span class="pinned-badge">推荐置顶·私网直连</span>
+                    </span>
+                    <span v-else-if="rule.condition === 'fallback'" class="fallback-badge">
+                      兜底规则 (固定于末尾)
                     </span>
                     <span v-else class="rule-code-text">{{ rule.condition }}</span>
                   </td>
@@ -1487,10 +1540,17 @@ onMounted(async () => {
   gap: 16px;
 }
 
+.rules-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 /* Diagnostics Bar */
 .health-diagnostics-bar {
   display: flex;
   flex-direction: column;
+  margin-bottom: 6px;
 }
 
 .health-status-banner.ok {
@@ -1834,13 +1894,20 @@ onMounted(async () => {
 }
 
 .form-select {
-  padding: 6px 10px;
-  background: var(--bg-card, #0f172a);
+  padding: 8px 12px;
+  background: var(--bg-input, #1e293b);
   border: 1px solid var(--border-color, #334155);
-  border-radius: 4px;
+  border-radius: 6px;
   color: var(--text-main, #f8fafc);
-  font-size: 12px;
+  font-size: 13px;
   outline: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.form-select:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
 }
 
 .intent-select {
@@ -1864,6 +1931,7 @@ onMounted(async () => {
 
 .val-input {
   width: 100%;
+  box-sizing: border-box;
 }
 
 .fast-tags-wrap {
@@ -1937,12 +2005,19 @@ onMounted(async () => {
 
 .form-input {
   padding: 8px 12px;
-  background: var(--bg-input, #090d16);
-  border: 1px solid var(--border-color, #1e293b);
+  background: var(--bg-input, #1e293b);
+  border: 1px solid var(--border-color, #334155);
   border-radius: 6px;
   color: var(--text-main, #f8fafc);
   font-size: 13px;
   outline: none;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
 }
 
 .field-hint {
@@ -2127,6 +2202,31 @@ onMounted(async () => {
   background: rgba(2, 132, 199, 0.08) !important;
 }
 
+.routing-table tr.row-pinned-fixed {
+  background: rgba(2, 132, 199, 0.04) !important;
+}
+
+.routing-table tr.row-pinned-fixed:hover {
+  background: rgba(2, 132, 199, 0.08) !important;
+}
+
+.pinned-rule-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pinned-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0284c7;
+  background: rgba(2, 132, 199, 0.12);
+  border: 1px solid rgba(2, 132, 199, 0.3);
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
 .routing-table tr.row-fallback-fixed {
   background: rgba(148, 163, 184, 0.04) !important;
   cursor: not-allowed;
@@ -2215,6 +2315,7 @@ onMounted(async () => {
 
 /* Bottom Statement Result */
 .bottom-statement-result-card {
+  margin-top: 14px;
   padding: 14px 18px;
   border-radius: 8px;
   background: var(--bg-card, #0f172a);

@@ -966,6 +966,40 @@ func main() {
 		})
 	})
 
+	// 7.1 Auto backup settings & schedule
+	mux.HandleFunc("GET /api/settings/backup", func(w http.ResponseWriter, r *http.Request) {
+		cfgDir := filepath.Dir(o.DaeConfig)
+		cfg := loadAutoBackupConfig(cfgDir)
+		writeJSON(w, http.StatusOK, cfg)
+	})
+
+	mux.HandleFunc("POST /api/settings/backup", func(w http.ResponseWriter, r *http.Request) {
+		var req AutoBackupConfig
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "无效的备份设置参数"})
+			return
+		}
+		if req.Time == "" {
+			req.Time = "03:00"
+		}
+		if req.Frequency == "" {
+			req.Frequency = "daily"
+		}
+		if req.KeepCount <= 0 {
+			req.KeepCount = 30
+		}
+		cfgDir := filepath.Dir(o.DaeConfig)
+		if err := saveAutoBackupConfig(cfgDir, req); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "保存自动备份配置失败: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"message": "配置文件自动备份策略已保存",
+			"config":  req,
+		})
+	})
+
 	mux.Handle("/", spaHandler())
 
 	srv := &http.Server{Addr: o.Listen, Handler: logRequests(mux), ReadHeaderTimeout: 10 * time.Second}
@@ -1319,4 +1353,52 @@ func saveWebUIUser(cfgDir string, u WebUIUserConfig) error {
 		return err
 	}
 	return os.WriteFile(userPath, b, 0600)
+}
+
+type AutoBackupConfig struct {
+	Enabled    bool   `json:"enabled"`
+	Frequency  string `json:"frequency"` // "daily", "weekly", "monthly"
+	Time       string `json:"time"`      // "03:00"
+	DayOfWeek  int    `json:"dayOfWeek"` // 1 - 7
+	DayOfMonth int    `json:"dayOfMonth"`// 1 - 28
+	KeepCount  int    `json:"keepCount"` // 30
+	UpdatedAt  string `json:"updatedAt"`
+}
+
+func getAutoBackupConfigPath(cfgDir string) string {
+	dataDir := filepath.Join(cfgDir, "data")
+	_ = os.MkdirAll(dataDir, 0700)
+	return filepath.Join(dataDir, "auto_backup_config.json")
+}
+
+func loadAutoBackupConfig(cfgDir string) AutoBackupConfig {
+	p := getAutoBackupConfigPath(cfgDir)
+	b, err := os.ReadFile(p)
+	if err == nil {
+		var cfg AutoBackupConfig
+		if json.Unmarshal(b, &cfg) == nil && cfg.Frequency != "" {
+			return cfg
+		}
+	}
+	defaultCfg := AutoBackupConfig{
+		Enabled:    true,
+		Frequency:  "daily",
+		Time:       "03:00",
+		DayOfWeek:  1,
+		DayOfMonth: 1,
+		KeepCount:  30,
+		UpdatedAt:  time.Now().Format("2006-01-02 15:04:05"),
+	}
+	_ = saveAutoBackupConfig(cfgDir, defaultCfg)
+	return defaultCfg
+}
+
+func saveAutoBackupConfig(cfgDir string, cfg AutoBackupConfig) error {
+	p := getAutoBackupConfigPath(cfgDir)
+	cfg.UpdatedAt = time.Now().Format("2006-01-02 15:04:05")
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, b, 0600)
 }
