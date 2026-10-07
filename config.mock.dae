@@ -1,0 +1,112 @@
+# ============================================================
+# config.mock.dae —— dae WebUI 开发/测试专用假数据
+#
+# ⚠️ 本文件所有节点、密码、UUID、域名、IP 均为虚构：
+#   - IP 使用 RFC 5737 文档保留段 (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
+#   - 域名使用 example.com / .invalid 保留域名
+# 配置解析、节点展示等功能一律基于本文件开发与测试，
+# 禁止读取系统中真实的 /usr/local/etc/dae/config.dae。
+# ============================================================
+
+global {
+    log_level: info
+    tproxy_port: 12345
+    tproxy_port_protect: true
+    so_mark_from_dae: 1234
+    lan_interface: eth0
+    wan_interface: eth0
+    auto_config_kernel_parameter: true
+    tcp_check_url: 'http://cp.cloudflare.com,1.1.1.1,2606:4700:4700::1111'
+    udp_check_dns: 'dns.google:53,8.8.8.8,2001:4860:4860::8888'
+    check_interval: 30s
+    check_tolerance: 50ms
+    dial_mode: domain
+    allow_insecure: false
+    sniffing_timeout: 100ms
+    disable_waiting_network: false
+}
+
+subscription {
+    # 假订阅地址，不可访问
+    mock_sub_a: 'https://sub.example.invalid/api/v1/client/subscribe?token=MOCK-TOKEN-AAAA'
+    mock_sub_b: 'https://sub-b.example.invalid/link/MOCK-TOKEN-BBBB?clash=0'
+}
+
+node {
+    hk_vless_01: 'vless://11111111-2222-3333-4444-555555555555@203.0.113.11:443?encryption=none&security=reality&sni=www.example.com&fp=chrome&pbk=MOCKPUBLICKEYxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&sid=0a1b2c3d&type=tcp&flow=xtls-rprx-vision#HK-VLESS-01'
+    jp_trojan_01: 'trojan://mock-password-jp01@198.51.100.21:443?sni=jp01.example.com&allowInsecure=0#JP-Trojan-01'
+    jp_trojan_02: 'trojan://mock-password-jp02@198.51.100.22:8443?sni=jp02.example.com#JP-Trojan-02'
+    sg_ss_01: 'ss://YWVzLTI1Ni1nY206bW9jay1wYXNzd29yZC1zZzAx@203.0.113.31:8388#SG-SS-01'
+    us_vmess_01: 'vmess://eyJ2IjoiMiIsInBzIjoiVVMtVk1lc3MtMDEiLCJhZGQiOiIxOTguNTEuMTAwLjQxIiwicG9ydCI6IjQ0MyIsImlkIjoiYWFhYWFhYWEtYmJiYi1jY2NjLWRkZGQtZWVlZWVlZWVlZWVlIiwiYWlkIjoiMCIsIm5ldCI6IndzIiwidHlwZSI6Im5vbmUiLCJob3N0IjoidXMwMS5leGFtcGxlLmNvbSIsInBhdGgiOiIvd3MiLCJ0bHMiOiJ0bHMifQ=='
+    tw_hy2_01: 'hysteria2://mock-auth-tw01@192.0.2.51:443?sni=tw01.example.com&insecure=0#TW-Hy2-01'
+    local_socks: 'socks5://mockuser:mockpass@192.0.2.100:1080#Local-SOCKS5'
+}
+
+dns {
+    ipversion_prefer: 4
+    upstream {
+        alidns: 'udp://223.5.5.5:53'
+        googledns: 'tcp+udp://dns.google:53'
+        cfdoh: 'https://cloudflare-dns.com/dns-query'
+    }
+    routing {
+        request {
+            qname(geosite:category-ads-all) -> reject
+            qname(geosite:google) -> googledns
+            qname(geosite:cn) -> alidns
+            qtype(https) -> reject
+            fallback: googledns
+        }
+        response {
+            upstream(googledns) -> accept
+            ip(geoip:private) && !qname(geosite:cn) -> googledns
+            fallback: accept
+        }
+    }
+}
+
+group {
+    proxy {
+        filter: subtag(mock_sub_a)
+        filter: name(hk_vless_01, jp_trojan_01, sg_ss_01)
+        policy: min_moving_avg
+    }
+
+    japan {
+        filter: name(keyword: 'JP')
+        filter: name(jp_trojan_01, jp_trojan_02)
+        policy: min_avg10
+    }
+
+    streaming {
+        filter: name(hk_vless_01, tw_hy2_01, us_vmess_01)
+        policy: fixed(0)
+    }
+
+    backup {
+        filter: subtag(mock_sub_b)
+        policy: random
+    }
+}
+
+routing {
+    pname(NetworkManager, systemd-resolved) -> direct
+    dip(224.0.0.0/3, 'ff00::/8') -> direct
+    dip(geoip:private) -> direct
+
+    domain(geosite:category-ads-all) -> block
+    l4proto(udp) && dport(443) && domain(geosite:youtube) -> block
+
+    domain(suffix: example.com) -> direct
+    domain(geosite:netflix, geosite:disney) -> streaming
+    domain(geosite:openai, geosite:category-ai-chat-!cn) -> japan
+    domain(geosite:google, geosite:github) -> proxy
+
+    sip(192.0.2.200) -> backup
+    dport(6881, 6882) -> direct
+
+    dip(geoip:cn) -> direct
+    domain(geosite:cn) -> direct
+
+    fallback: proxy
+}

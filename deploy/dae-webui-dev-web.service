@@ -1,0 +1,16 @@
+[Unit]
+Description=dae-webui DEV frontend (Vite HMR, :5173)
+After=network-online.target dae-webui-dev-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dae-webui/frontend
+Environment=HOME=/root
+Environment=PATH=/usr/local/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/node/bin/pnpm dev
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

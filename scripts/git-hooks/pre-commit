@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# 阻止真实节点/订阅信息进入 git (进而被 push 到外网)。
+# 规则: 仅 config.mock.dae 允许包含代理链接; 其它暂存文件出现代理协议链接即拒绝提交。
+set -euo pipefail
+
+fail=0
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  case "$f" in
+    config.mock.dae) continue ;;
+    *.dae|*.sub|*.sub.b64|*/sublist|sublist)
+      echo "✗ 禁止提交 dae 配置/订阅文件: $f"; fail=1; continue ;;
+  esac
+  if git show ":$f" | grep -nEi '(vless|vmess|trojan|ss|ssr|hysteria2?|hy2|tuic|juicity|socks5?|https-file)://[^ *"'"'"']{6,}' >/dev/null; then
+    echo "✗ $f 含疑似真实代理/订阅链接 (仅 config.mock.dae 允许)"; fail=1
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+if [ "$fail" = 1 ]; then
+  echo "提交已阻止。请移除敏感内容, 或把假数据放入 config.mock.dae。"
+  exit 1
+fi
