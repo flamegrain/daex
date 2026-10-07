@@ -256,13 +256,13 @@ onMounted(() => {
     <header class="view-header">
       <div class="header-left">
         <div class="title-row">
-          <h2>节点与策略</h2>
+          <h2>{{ t('nodes.title') }}</h2>
           <span class="profile-badge">
             <Radio :size="12" class="live-dot" />
-            生效文件: {{ overview.activeProfile }}
+            {{ t('nodes.active_profile') }}: {{ overview.activeProfile }}
           </span>
         </div>
-        <p class="subtitle">实时解析并联动底层 eBPF 分流策略组、节点健康延迟与订阅源</p>
+        <p class="subtitle">{{ t('nodes.subtitle') }}</p>
       </div>
 
       <div class="header-actions">
@@ -270,19 +270,19 @@ onMounted(() => {
           class="action-btn primary"
           :disabled="pingingAll"
           @click="pingAllNodes"
-          title="测速当前全部节点延迟"
+          :title="t('nodes.ping.all')"
         >
           <Zap :size="14" :class="{ spin: pingingAll }" />
-          <span>{{ pingingAll ? '测速中...' : '一键全部测速' }}</span>
+          <span>{{ pingingAll ? t('nodes.ping.running') : t('nodes.ping.all') }}</span>
         </button>
 
         <button
           class="action-btn secondary"
           @click="showSimulator = true"
-          title="打开分流路由匹配测试器"
+          :title="t('nodes.trace.title')"
         >
           <Compass :size="14" />
-          <span>分流规则调试</span>
+          <span>{{ t('nodes.trace.title') }}</span>
         </button>
 
         <button
@@ -300,41 +300,41 @@ onMounted(() => {
     <section class="stat-bar">
       <div class="stat-card">
         <div class="stat-label">
-          <Server :size="14" /> 节点总数
+          <Server :size="14" /> {{ t('nodes.stat.total') }}
         </div>
         <div class="stat-val">
           {{ overview.totalNodes }}
-          <span class="stat-sub">生效中 {{ overview.activeNodes }}</span>
+          <span class="stat-sub">{{ t('nodes.stat.active') }} {{ overview.activeNodes }}</span>
         </div>
       </div>
 
       <div class="stat-card">
         <div class="stat-label">
-          <Layers :size="14" /> 策略分组 (Groups)
+          <Layers :size="14" /> {{ t('nodes.stat.groups') }}
         </div>
         <div class="stat-val">
           {{ overview.groups.length }}
-          <span class="stat-sub">动态故障转移 / 负载</span>
+          <span class="stat-sub">{{ t('nodes.stat.groups_sub') }}</span>
         </div>
       </div>
 
       <div class="stat-card">
         <div class="stat-label">
-          <Rss :size="14" /> 订阅源 (Subscriptions)
+          <Rss :size="14" /> {{ t('nodes.stat.subs') }}
         </div>
         <div class="stat-val">
           {{ overview.subscriptions.length }}
-          <span class="stat-sub">外部订阅聚合</span>
+          <span class="stat-sub">{{ t('nodes.stat.subs_sub') }}</span>
         </div>
       </div>
 
       <div class="stat-card">
         <div class="stat-label">
-          <Clock :size="14" /> 最近测速
+          <Clock :size="14" /> {{ t('nodes.stat.tested') }}
         </div>
         <div class="stat-val">
           {{ formatTime(overview.lastTestedAt) }}
-          <span class="stat-sub">TCP Ping 握手探测</span>
+          <span class="stat-sub">{{ t('nodes.stat.tested_sub') }}</span>
         </div>
       </div>
     </section>
@@ -347,7 +347,7 @@ onMounted(() => {
         @click="activeTab = 'nodes'"
       >
         <Server :size="15" />
-        <span>节点列表 (Nodes)</span>
+        <span>{{ t('nodes.tab.nodes') }}</span>
         <span class="pill-count">{{ overview.nodes.length }}</span>
       </button>
 
@@ -357,7 +357,7 @@ onMounted(() => {
         @click="activeTab = 'groups'"
       >
         <Layers :size="15" />
-        <span>策略分组 (Groups)</span>
+        <span>{{ t('nodes.tab.groups') }}</span>
         <span class="pill-count">{{ overview.groups.length }}</span>
       </button>
 
@@ -367,7 +367,7 @@ onMounted(() => {
         @click="activeTab = 'subscriptions'"
       >
         <Rss :size="15" />
-        <span>订阅源 (Subscriptions)</span>
+        <span>{{ t('nodes.tab.subscriptions') }}</span>
         <span class="pill-count">{{ overview.subscriptions.length }}</span>
       </button>
     </div>
@@ -383,7 +383,7 @@ onMounted(() => {
             <input
               v-model="searchQuery"
               type="text"
-              placeholder="搜索节点别名、Key 或服务器目标地址..."
+              :placeholder="t('nodes.filter.search_placeholder')"
               class="search-input"
             />
             <button v-if="searchQuery" class="clear-btn" @click="searchQuery = ''">
@@ -393,27 +393,27 @@ onMounted(() => {
 
           <div class="filter-group">
             <div class="select-wrap">
-              <span class="sel-label">协议:</span>
+              <span class="sel-label">{{ t('nodes.filter.proto') }}:</span>
               <select v-model="protocolFilter" class="toolbar-select">
-                <option value="ALL">全部协议</option>
+                <option value="ALL">{{ t('nodes.filter.proto.all') }}</option>
                 <option v-for="p in availableProtocols" :key="p" :value="p">{{ p }}</option>
               </select>
             </div>
 
             <div class="select-wrap">
-              <span class="sel-label">地区:</span>
+              <span class="sel-label">{{ t('nodes.filter.region') }}:</span>
               <select v-model="countryFilter" class="toolbar-select">
-                <option value="ALL">全部地区</option>
+                <option value="ALL">{{ t('nodes.filter.region.all') }}</option>
                 <option v-for="c in availableCountries" :key="c" :value="c">{{ c }}</option>
               </select>
             </div>
 
             <div class="select-wrap">
-              <span class="sel-label">排序:</span>
+              <span class="sel-label">{{ t('nodes.filter.sort') }}:</span>
               <select v-model="sortBy" class="toolbar-select">
-                <option value="default">默认顺序</option>
-                <option value="latency-asc">延迟低到高</option>
-                <option value="name-asc">名称 A-Z</option>
+                <option value="default">{{ t('nodes.filter.sort.default') }}</option>
+                <option value="latency-asc">{{ t('nodes.filter.sort.latency') }}</option>
+                <option value="name-asc">{{ t('nodes.filter.sort.name') }}</option>
               </select>
             </div>
           </div>
@@ -424,13 +424,13 @@ onMounted(() => {
           <table class="nodes-table">
             <thead>
               <tr>
-                <th style="width: 80px">状态</th>
-                <th style="width: 120px">国家/地区</th>
-                <th style="width: 25%">节点名称 (Alias)</th>
-                <th style="width: 90px">协议</th>
-                <th style="width: 28%">目标地址与端口</th>
-                <th style="width: 140px">延迟 (Ping)</th>
-                <th style="width: 90px; text-align: right">操作</th>
+                <th style="width: 80px">{{ t('nodes.table.status') }}</th>
+                <th style="width: 120px">{{ t('nodes.table.region') }}</th>
+                <th style="width: 25%">{{ t('nodes.table.name') }}</th>
+                <th style="width: 90px">{{ t('nodes.table.proto') }}</th>
+                <th style="width: 28%">{{ t('nodes.table.address') }}</th>
+                <th style="width: 140px">{{ t('nodes.table.latency') }}</th>
+                <th style="width: 90px; text-align: right">{{ t('nodes.table.action') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -441,9 +441,9 @@ onMounted(() => {
               >
                 <td>
                   <span v-if="node.active" class="active-pill" title="当前节点正在转发流量">
-                    <CheckCircle2 :size="12" /> 生效
+                    <CheckCircle2 :size="12" /> {{ t('nodes.table.active') }}
                   </span>
-                  <span v-else class="standby-pill">就绪</span>
+                  <span v-else class="standby-pill">{{ t('nodes.table.standby') }}</span>
                 </td>
 
                 <td class="country-cell">
@@ -501,17 +501,17 @@ onMounted(() => {
                     class="btn-ping"
                     :disabled="pingingKeys.has(node.key)"
                     @click="pingSingleNode(node.key)"
-                    title="重新测速此节点"
+                    :title="t('nodes.ping.single')"
                   >
                     <Zap :size="12" :class="{ spin: pingingKeys.has(node.key) }" />
-                    <span>测速</span>
+                    <span>{{ t('nodes.ping.single') }}</span>
                   </button>
                 </td>
               </tr>
 
               <tr v-if="filteredNodes.length === 0">
                 <td colspan="7" class="empty-row">
-                  未找到符合条件的节点信息
+                  {{ t('nodes.table.empty') }}
                 </td>
               </tr>
             </tbody>
@@ -539,7 +539,7 @@ onMounted(() => {
 
             <!-- Active Selected Node in this Group -->
             <div class="group-selected-box">
-              <div class="box-label">🎯 当前组主力出口选路 (Active Candidate):</div>
+              <div class="box-label">🎯 {{ t('nodes.group.candidate') }}:</div>
               <div v-if="group.selectedNode" class="selected-node-item">
                 <div class="sel-info">
                   <span class="flag-icon">{{ group.selectedNode.flag }}</span>
@@ -551,13 +551,13 @@ onMounted(() => {
                 </div>
               </div>
               <div v-else class="no-node-text">
-                暂未匹配到可用节点
+                {{ t('nodes.group.no_node') }}
               </div>
             </div>
 
             <!-- Filter Rules inside Group -->
             <div class="group-filters-section">
-              <div class="filter-title">过滤匹配规则 (Filters):</div>
+              <div class="filter-title">{{ t('nodes.group.filters') }}:</div>
               <div class="filter-chips">
                 <span
                   v-for="(f, idx) in group.filters"
@@ -572,10 +572,10 @@ onMounted(() => {
             <!-- Matched Nodes Count & List -->
             <div class="group-footer">
               <span class="node-count-label">
-                绑定候选节点: <strong>{{ group.nodeCount }}</strong> 个
+                {{ t('nodes.group.nodes_count') }}: <strong>{{ group.nodeCount }}</strong>
               </span>
               <div class="node-keys-preview mono truncate">
-                {{ (group.nodeKeys || []).join(', ') || '无' }}
+                {{ (group.nodeKeys || []).join(', ') || '-' }}
               </div>
             </div>
           </div>
@@ -596,7 +596,7 @@ onMounted(() => {
                 <h3 class="sub-tag">{{ sub.tag }}</h3>
               </div>
               <span class="sub-status-pill">
-                已导入 {{ sub.nodeCount }} 节点
+                {{ t('nodes.sub.imported') }} {{ sub.nodeCount }}
               </span>
             </div>
 
@@ -605,7 +605,7 @@ onMounted(() => {
             </div>
 
             <div class="sub-actions">
-              <span class="sub-hint">已随当前生效配置文件自动就绪</span>
+              <span class="sub-hint">{{ t('nodes.sub.ready_hint') }}</span>
             </div>
           </div>
         </div>
@@ -618,7 +618,7 @@ onMounted(() => {
         <div class="modal-header">
           <div class="modal-title">
             <Compass :size="18" class="sim-icon" />
-            <h3>分流路由仿真调试器 (Routing Rule Trace)</h3>
+            <h3>{{ t('nodes.sim.title') }}</h3>
           </div>
           <button class="close-btn" @click="showSimulator = false">
             <X :size="18" />
@@ -628,7 +628,7 @@ onMounted(() => {
         <div class="modal-body">
           <!-- Presets -->
           <div class="presets-row">
-            <span class="preset-label">快捷测试用例:</span>
+            <span class="preset-label">{{ t('nodes.sim.presets') }}:</span>
             <button
               class="preset-btn"
               @click="applyPreset('www.google.com', '142.250.190.46', '谷歌搜索')"
@@ -657,50 +657,50 @@ onMounted(() => {
               class="preset-btn"
               @click="applyPreset('router.local', '192.168.1.1', '内网私有')"
             >
-              内网私有 (192.168.1.1)
+              192.168.1.1
             </button>
             <button
               class="preset-btn"
               @click="applyPreset('baidu.com', '110.242.68.66', '国内直连')"
             >
-              国内直连 (.cn)
+              Baidu (.cn)
             </button>
           </div>
 
           <!-- Input Form -->
           <div class="sim-form-grid">
             <div class="form-field">
-              <label>目标域名 (Domain)</label>
+              <label>{{ t('nodes.sim.domain') }}</label>
               <input
                 v-model="simDomain"
                 type="text"
-                placeholder="例如: www.google.com"
+                placeholder="www.google.com"
                 class="sim-input"
               />
             </div>
 
             <div class="form-field">
-              <label>目标 IP 地址 (Destination IP)</label>
+              <label>{{ t('nodes.sim.ip') }}</label>
               <input
                 v-model="simIP"
                 type="text"
-                placeholder="例如: 142.250.190.46"
+                placeholder="142.250.190.46"
                 class="sim-input mono"
               />
             </div>
 
             <div class="form-field">
-              <label>目标端口 (Port)</label>
+              <label>{{ t('nodes.sim.port') }}</label>
               <input
                 v-model="simPort"
                 type="text"
-                placeholder="例如: 443"
+                placeholder="443"
                 class="sim-input mono"
               />
             </div>
 
             <div class="form-field">
-              <label>传输层协议</label>
+              <label>{{ t('nodes.sim.proto') }}</label>
               <select v-model="simProto" class="sim-input">
                 <option value="tcp">TCP</option>
                 <option value="udp">UDP</option>
@@ -715,7 +715,7 @@ onMounted(() => {
               @click="runRoutingSimulator"
             >
               <Play :size="14" :class="{ spin: simLoading }" />
-              <span>{{ simLoading ? '仿真评估中...' : '开始仿真评估' }}</span>
+              <span>{{ simLoading ? t('nodes.sim.running') : t('nodes.sim.run') }}</span>
             </button>
           </div>
 
@@ -724,20 +724,20 @@ onMounted(() => {
             <div class="result-summary-card">
               <div class="summary-top">
                 <div class="res-target-badge" :class="simResult.targetType">
-                  <span class="label">最终走向:</span>
+                  <span class="label">{{ t('nodes.sim.target') }}:</span>
                   <strong>{{ simResult.target }}</strong>
                   <span class="type-tag">({{ simResult.targetType }})</span>
                 </div>
 
                 <div class="hit-rule-box">
-                  <span class="lbl">命中规则:</span>
+                  <span class="lbl">{{ t('nodes.sim.rule') }}:</span>
                   <code class="rule-code">{{ simResult.matchedRule }}</code>
                 </div>
               </div>
 
               <!-- Selected Node Card if Group -->
               <div v-if="simResult.selectedNode" class="result-node-card">
-                <span class="sel-tag">🚀 最终分流出口节点:</span>
+                <span class="sel-tag">🚀 {{ t('nodes.sim.node') }}:</span>
                 <div class="node-chip">
                   <span class="flag">{{ simResult.selectedNode.flag }}</span>
                   <strong>{{ simResult.selectedNode.name }}</strong>
@@ -750,7 +750,7 @@ onMounted(() => {
 
             <!-- Trace Execution Steps -->
             <div class="trace-steps-container">
-              <div class="trace-header">dae 规则评估追踪日志 (Trace Execution Log):</div>
+              <div class="trace-header">{{ t('nodes.sim.log') }}:</div>
               <div class="trace-console mono">
                 <div
                   v-for="(step, idx) in simResult.traceSteps"
