@@ -11,7 +11,9 @@ import {
   Clock,
   Layers,
   Zap,
-  RefreshCw
+  RefreshCw,
+  Gauge,
+  PlayCircle
 } from 'lucide-vue-next'
 import * as echarts from 'echarts'
 import { theme } from '../composables/useSettings'
@@ -34,13 +36,86 @@ interface TrafficPoint {
   downloadBps: number
 }
 
+interface ConnectivityItem {
+  id: string
+  name: string
+  category: string
+  url: string
+  expectedOut: string
+  status: 'ok' | 'error' | 'pending'
+  latency: number
+  httpCode: number
+  message: string
+  lastTested?: string
+}
+
 const dashboardData = ref<any>(null)
 const loading = ref(true)
-const pingingNodes = ref(false)
 const speedChartEl = ref<HTMLDivElement | null>(null)
 
 let speedChart: echarts.ECharts | null = null
 let timer: any = null
+
+const connectivityList = ref<ConnectivityItem[]>([
+  {
+    id: 'aliyun',
+    name: '阿里云访问检测',
+    category: '国内直连',
+    url: 'https://www.aliyun.com',
+    expectedOut: '国内直连',
+    status: 'ok',
+    latency: 18,
+    httpCode: 200,
+    message: '国内高速骨干网直连畅通'
+  },
+  {
+    id: 'google',
+    name: 'Google 访问检测',
+    category: '国际搜索',
+    url: 'https://www.google.com/generate_204',
+    expectedOut: '海外代理',
+    status: 'ok',
+    latency: 64,
+    httpCode: 204,
+    message: '海外代理链路畅通'
+  },
+  {
+    id: 'github',
+    name: 'GitHub 访问检测',
+    category: '开发者服务',
+    url: 'https://github.com',
+    expectedOut: '海外代理',
+    status: 'ok',
+    latency: 82,
+    httpCode: 200,
+    message: 'Git 代码托管与网页访问正常'
+  },
+  {
+    id: 'youtube',
+    name: 'YouTube 访问检测',
+    category: '流媒体服务',
+    url: 'https://www.youtube.com/generate_204',
+    expectedOut: '海外代理',
+    status: 'ok',
+    latency: 71,
+    httpCode: 204,
+    message: '流媒体视频 CDN 连通良好'
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI 访问检测',
+    category: 'AI 大模型',
+    url: 'https://api.openai.com/v1/models',
+    expectedOut: '原生解锁',
+    status: 'ok',
+    latency: 108,
+    httpCode: 200,
+    message: 'API 接口正常，原生节点已解锁'
+  }
+])
+
+const testingTargets = ref<Record<string, boolean>>({})
+const testingAll = ref(false)
 
 function formatBps(bytesPerSec: number) {
   if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s'
@@ -73,17 +148,69 @@ async function fetchDashboard() {
   }
 }
 
-async function handleQuickPingAll() {
-  pingingNodes.value = true
+async function fetchConnectivity() {
   try {
-    const res = await fetch('/api/nodes/ping', { method: 'POST' })
+    const res = await fetch('/api/diagnostics/connectivity')
     if (res.ok) {
-      await fetchDashboard()
+      const data = await res.json()
+      if (data.targets && data.targets.length > 0) {
+        connectivityList.value = data.targets
+      }
     }
   } catch (e) {
-    console.error('Quick ping error:', e)
+    console.error('Fetch connectivity error:', e)
+  }
+}
+
+async function testTarget(targetId: string) {
+  testingTargets.value[targetId] = true
+  try {
+    const res = await fetch('/api/diagnostics/connectivity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: targetId })
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.results && data.results.length > 0) {
+        const item = data.results[0]
+        const idx = connectivityList.value.findIndex(t => t.id === item.id)
+        if (idx >= 0) {
+          connectivityList.value[idx] = item
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Test target error:', e)
   } finally {
-    pingingNodes.value = false
+    testingTargets.value[targetId] = false
+  }
+}
+
+async function testAllTargets() {
+  testingAll.value = true
+  connectivityList.value.forEach(t => {
+    testingTargets.value[t.id] = true
+  })
+  try {
+    const res = await fetch('/api/diagnostics/connectivity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: 'all' })
+    })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.results && data.results.length > 0) {
+        connectivityList.value = data.results
+      }
+    }
+  } catch (e) {
+    console.error('Test all targets error:', e)
+  } finally {
+    testingAll.value = false
+    connectivityList.value.forEach(t => {
+      testingTargets.value[t.id] = false
+    })
   }
 }
 
@@ -102,7 +229,7 @@ function updateCharts(data: any) {
   if (!data) return
   const isLight = theme.value === 'light'
 
-  // 1. Line chart for Traffic Speed
+  // Line chart for Traffic Speed
   if (speedChart && data.history) {
     const times = data.history.map((h: TrafficPoint) =>
       new Date(h.timestamp * 1000).toLocaleTimeString([], { hour12: false })
@@ -203,6 +330,7 @@ onMounted(() => {
   nextTick(() => {
     initCharts()
     fetchDashboard()
+    fetchConnectivity()
     timer = setInterval(fetchDashboard, 3000)
   })
 })
@@ -297,7 +425,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- Charts & Nodes Summary Row -->
+    <!-- Charts & Connectivity Quick Check Row -->
     <section class="charts-grid">
       <!-- Speed Trend Chart (Left) -->
       <div class="chart-card speed-card">
@@ -311,62 +439,112 @@ onUnmounted(() => {
         <div class="chart-container" ref="speedChartEl"></div>
       </div>
 
-      <!-- Node Summary, Country and Latency Results (Right) -->
-      <div class="chart-card node-summary-card">
+      <!-- Connectivity Quick Check Panel (Right) -->
+      <div class="chart-card connectivity-card">
         <div class="card-head">
           <div class="head-title">
-            <Server class="h-icon" :size="16" />
-            <span>节点列表与测速状态</span>
+            <Gauge class="h-icon" :size="16" />
+            <span>连通性快速检测面板</span>
           </div>
           <button
-            class="btn-ping-quick"
-            :disabled="pingingNodes"
-            @click="handleQuickPingAll"
-            title="一键测速全部可用节点"
+            class="btn-test-all"
+            :disabled="testingAll"
+            @click="testAllTargets"
+            title="一键测试所有常用服务连通性与分流状态"
           >
-            <Zap :size="12" :class="{ spin: pingingNodes }" />
-            <span>{{ pingingNodes ? '测速中...' : '快速测速' }}</span>
+            <Zap :size="12" :class="{ spin: testingAll }" />
+            <span>{{ testingAll ? '正在全量检测...' : '一键全部检测' }}</span>
           </button>
         </div>
 
-        <div class="node-compact-list">
+        <div class="connectivity-list">
           <div
-            v-for="node in dashboardData?.nodes"
-            :key="node.key"
-            class="compact-node-item"
-            :class="{ active: node.active }"
+            v-for="item in connectivityList"
+            :key="item.id"
+            class="connectivity-item"
+            :class="{ testing: testingTargets[item.id] }"
           >
-            <!-- Country & Flag -->
-            <div class="node-item-country">
-              <span class="flag-icon">{{ node.flag }}</span>
-              <span class="country-name">{{ node.country }}</span>
+            <!-- Platform Brand Icon -->
+            <div class="brand-icon-box" :class="item.id">
+              <!-- Aliyun -->
+              <svg v-if="item.id === 'aliyun'" viewBox="0 0 24 24" class="svg-icon" fill="currentColor">
+                <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95C8.08 7.14 9.94 6 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11c1.56.1 2.78 1.41 2.78 2.96 0 1.65-1.35 3-3 3z"/>
+              </svg>
+
+              <!-- Google -->
+              <svg v-else-if="item.id === 'google'" viewBox="0 0 24 24" class="svg-icon">
+                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.97 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+              </svg>
+
+              <!-- GitHub -->
+              <svg v-else-if="item.id === 'github'" viewBox="0 0 24 24" class="svg-icon" fill="currentColor">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+              </svg>
+
+              <!-- YouTube -->
+              <svg v-else-if="item.id === 'youtube'" viewBox="0 0 24 24" class="svg-icon" fill="currentColor">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+              </svg>
+
+              <!-- OpenAI -->
+              <svg v-else-if="item.id === 'openai'" viewBox="0 0 24 24" class="svg-icon" fill="currentColor">
+                <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.064l-4.84 2.793a4.499 4.499 0 0 1-6.14-1.65zM2.34 8.653a4.47 4.47 0 0 1 2.339-1.974V12.2a.78.78 0 0 0 .392.682l5.836 3.368-2.02 1.168a.08.08 0 0 1-.071.007L3.98 14.63A4.504 4.504 0 0 1 2.34 8.653zm16.597 3.855l-5.833-3.37L15.12 7.97a.08.08 0 0 1 .071-.007l4.836 2.795a4.5 4.5 0 0 1-.61 8.103v-5.672a.79.79 0 0 0-.48-.688zm2.01-4.423l-.141-.085-4.773-2.782a.776.776 0 0 0-.785 0L9.409 8.587V6.255a.08.08 0 0 1 .03-.064l4.84-2.793a4.499 4.499 0 0 1 6.668 4.258zm-9.742 5.093l2.8-1.616 2.805 1.616v3.232l-2.805 1.616-2.8-1.616z"/>
+              </svg>
             </div>
 
-            <!-- Node Name & Address -->
-            <div class="node-item-info">
-              <div class="node-item-title">
-                <span class="node-name-text" :title="node.name">{{ node.name }}</span>
-                <span class="proto-badge">{{ node.protocol }}</span>
+            <!-- Target Detail Info -->
+            <div class="target-meta">
+              <div class="target-title-row">
+                <span class="target-name">{{ item.name }}</span>
+                <span
+                  class="route-pill"
+                  :class="{
+                    direct: item.expectedOut.includes('直连'),
+                    proxy: item.expectedOut.includes('代理'),
+                    ai: item.expectedOut.includes('解锁')
+                  }"
+                >
+                  {{ item.expectedOut }}
+                </span>
               </div>
-              <span class="node-addr-text mono" :title="`${node.address}:${node.port}`">
-                {{ node.address }}:{{ node.port }}
-              </span>
+              <div class="target-sub-row">
+                <span class="target-url mono">{{ item.url.replace('https://', '').split('/')[0] }}</span>
+                <span class="sep">·</span>
+                <span class="target-desc">{{ item.message }}</span>
+              </div>
             </div>
 
-            <!-- Ping Latency & State -->
-            <div class="node-item-status">
+            <!-- Status Indicator & Single Test Button -->
+            <div class="target-actions">
+              <!-- Latency Pill -->
               <span
-                class="latency-pill"
+                class="latency-badge"
                 :class="{
-                  fast: node.latency < 50,
-                  medium: node.latency >= 50 && node.latency < 100,
-                  slow: node.latency >= 100
+                  fast: item.latency < 50,
+                  medium: item.latency >= 50 && item.latency < 100,
+                  slow: item.latency >= 100
                 }"
               >
-                <span class="latency-dot"></span>
-                {{ node.latency }} ms
+                <span class="dot"></span>
+                {{ item.latency }} ms
               </span>
-              <span v-if="node.active" class="active-tag">生效中</span>
+
+              <!-- Test Button -->
+              <button
+                class="btn-test-single"
+                :disabled="testingTargets[item.id] || testingAll"
+                @click="testTarget(item.id)"
+                :title="`重新测试 ${item.name}`"
+              >
+                <RefreshCw
+                  :size="12"
+                  :class="{ spin: testingTargets[item.id] }"
+                />
+                <span>{{ testingTargets[item.id] ? '检测中' : '检测' }}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -575,11 +753,11 @@ onUnmounted(() => {
 /* Charts Grid */
 .charts-grid {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: 1.15fr 0.85fr;
   gap: 16px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .charts-grid {
     grid-template-columns: 1fr;
   }
@@ -623,79 +801,102 @@ onUnmounted(() => {
 }
 
 .chart-container {
-  height: 240px;
+  height: 250px;
   width: 100%;
 }
 
-/* Right Side: Node Summary Compact List */
-.btn-ping-quick {
+/* Right Side: Connectivity Quick Check Panel */
+.btn-test-all {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 5px;
+  padding: 4px 10px;
   font-size: 11px;
+  font-weight: 500;
   border-radius: 4px;
   background: rgba(2, 132, 199, 0.12);
   color: #0284c7;
   border: 1px solid rgba(2, 132, 199, 0.25);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
-.btn-ping-quick:hover:not(:disabled) {
+.btn-test-all:hover:not(:disabled) {
   background: #0284c7;
   color: #fff;
 }
 
-.node-compact-list {
+.connectivity-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  height: 240px;
+  gap: 7px;
+  height: 250px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 2px;
 }
 
-.compact-node-item {
+.connectivity-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
+  gap: 10px;
+  padding: 7px 10px;
   background: var(--bg-input, #090d16);
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 6px;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
-.compact-node-item:hover {
+.connectivity-item:hover {
   border-color: #0284c7;
   background: var(--bg-input, #1e293b);
 }
 
-.compact-node-item.active {
-  border-color: rgba(16, 185, 129, 0.35);
-  background: rgba(16, 185, 129, 0.04);
+.connectivity-item.testing {
+  opacity: 0.75;
 }
 
-.node-item-country {
+/* Brand Icons */
+.brand-icon-box {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  min-width: 50px;
-  gap: 2px;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.flag-icon {
-  font-size: 18px;
+.svg-icon {
+  width: 16px;
+  height: 16px;
 }
 
-.country-name {
-  font-size: 11px;
-  color: var(--text-muted, #94a3b8);
-  white-space: nowrap;
+.brand-icon-box.aliyun {
+  background: rgba(255, 106, 0, 0.12);
+  color: #ff6a00;
 }
 
-.node-item-info {
+.brand-icon-box.google {
+  background: rgba(66, 133, 244, 0.12);
+}
+
+.brand-icon-box.github {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-main, #f8fafc);
+}
+
+.brand-icon-box.youtube {
+  background: rgba(255, 0, 0, 0.12);
+  color: #ff0000;
+}
+
+.brand-icon-box.openai {
+  background: rgba(16, 163, 127, 0.12);
+  color: #10a37f;
+}
+
+/* Target Details */
+.target-meta {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -703,31 +904,46 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-.node-item-title {
+.target-title-row {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.node-name-text {
+.target-name {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-main, #f8fafc);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.proto-badge {
+.route-pill {
   font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: rgba(2, 132, 199, 0.15);
-  color: #0284c7;
-  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.node-addr-text {
+.route-pill.direct {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.route-pill.proxy {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+}
+
+.route-pill.ai {
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
+
+.target-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--text-muted, #64748b);
   white-space: nowrap;
@@ -735,14 +951,25 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
-.node-item-status {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+.target-url {
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
 }
 
-.latency-pill {
+.target-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Actions & Latency */
+.target-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.latency-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -754,43 +981,59 @@ onUnmounted(() => {
   background: var(--bg-card, #0f172a);
 }
 
-.latency-dot {
+.latency-badge .dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
 }
 
-.latency-pill.fast {
+.latency-badge.fast {
   color: #10b981;
 }
 
-.latency-pill.fast .latency-dot {
+.latency-badge.fast .dot {
   background: #10b981;
 }
 
-.latency-pill.medium {
+.latency-badge.medium {
   color: #f59e0b;
 }
 
-.latency-pill.medium .latency-dot {
+.latency-badge.medium .dot {
   background: #f59e0b;
 }
 
-.latency-pill.slow {
+.latency-badge.slow {
   color: #ef4444;
 }
 
-.latency-pill.slow .latency-dot {
+.latency-badge.slow .dot {
   background: #ef4444;
 }
 
-.active-tag {
-  font-size: 10px;
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.12);
-  padding: 1px 6px;
+.btn-test-single {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  font-size: 11px;
   border-radius: 4px;
-  font-weight: 500;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #334155);
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-test-single:hover:not(:disabled) {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+}
+
+.btn-test-single:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Bottom Nodes Full Table */

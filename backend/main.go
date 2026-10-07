@@ -466,6 +466,10 @@ func main() {
 	mux.HandleFunc("GET /api/routing/templates", handleGetRoutingTemplates(o))
 	mux.HandleFunc("POST /api/routing/templates/update", handleUpdateRoutingTemplates(o))
 
+	// 2.3.2 Quick Connectivity diagnostics
+	mux.HandleFunc("GET /api/diagnostics/connectivity", handleGetConnectivity())
+	mux.HandleFunc("POST /api/diagnostics/connectivity", handleTestConnectivity())
+
 	// 2.4 System update checks and actions
 	mux.HandleFunc("GET /api/update/check", func(w http.ResponseWriter, r *http.Request) {
 		res, err := checkSystemUpdate(r.Context(), o.DaeBin)
