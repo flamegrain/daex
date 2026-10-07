@@ -8,7 +8,7 @@ bin/
 
 # 安全: 禁止提交任何真实 dae 配置/订阅, 仅允许假数据 config.mock.dae
 *.dae
-!config.mock.dae
+!/config.mock.dae
 *.sub
 *.sub.b64
 sublist

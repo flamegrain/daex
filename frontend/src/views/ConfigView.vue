@@ -19,7 +19,10 @@ import {
   Layers,
   GitFork,
   Code,
-  LayoutGrid
+  LayoutGrid,
+  Files,
+  Check,
+  Copy
 } from 'lucide-vue-next'
 import { EditorState } from '@codemirror/state'
 import { EditorView, lineNumbers, keymap } from '@codemirror/view'
@@ -28,6 +31,14 @@ import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
 
 interface BackupItem {
   name: string
+  size: number
+  modTime: string
+}
+
+interface ConfigProfile {
+  name: string
+  path: string
+  isActive: boolean
   size: number
   modTime: string
 }
@@ -108,6 +119,14 @@ const showBackupModal = ref(false)
 const backups = ref<BackupItem[]>([])
 const newBackupLabel = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+
+// Config profile management
+const configProfiles = ref<ConfigProfile[]>([])
+const currentSelectedConfig = ref<string>('config.mock.dae')
+const activeRunningConfig = ref<string>('config.mock.dae')
+const showNewProfileModal = ref(false)
+const newProfileName = ref('')
+const activatingConfig = ref(false)
 
 // Modal states for CRUD
 const showNodeModal = ref(false)
@@ -214,12 +233,29 @@ function setEditorText(text: string) {
   isDirty.value = false
 }
 
-async function loadConfig() {
+async function fetchConfigProfiles() {
+  try {
+    const res = await fetch('/api/configs')
+    if (res.ok) {
+      const data = await res.json()
+      configProfiles.value = data.configs || []
+      activeRunningConfig.value = data.currentActive || 'config.mock.dae'
+    }
+  } catch (e) {
+    console.error('Fetch config profiles failed:', e)
+  }
+}
+
+async function loadConfig(profileName?: string) {
   loading.value = true
+  if (profileName) {
+    currentSelectedConfig.value = profileName
+  }
+  const target = currentSelectedConfig.value
   try {
     const [resRaw, resModel] = await Promise.all([
-      fetch('/api/config'),
-      fetch('/api/config/model')
+      fetch(`/api/config?name=${encodeURIComponent(target)}`),
+      fetch(`/api/config/model?name=${encodeURIComponent(target)}`)
     ])
     if (resRaw.ok) {
       const data = await resRaw.json()
@@ -231,6 +267,7 @@ async function loadConfig() {
     if (resModel.ok) {
       configModel.value = await resModel.json()
     }
+    await fetchConfigProfiles()
   } catch (err: any) {
     alert('加载配置失败: ' + err.message)
   } finally {
@@ -238,20 +275,109 @@ async function loadConfig() {
   }
 }
 
+async function handleSelectProfile(name: string) {
+  if (isDirty.value) {
+    if (!confirm('当前配置有未保存修改，切换配置文件将丢失未保存的改动，确认继续切换吗？')) {
+      return
+    }
+  }
+  currentSelectedConfig.value = name
+  await loadConfig(name)
+}
+
+async function activateSelectedProfile(name?: string) {
+  const target = name || currentSelectedConfig.value
+  if (!confirm(`确认使配置文件 [${target}] 生效到主 dae 服务吗？\n生效后系统将自动重载 (systemctl reload dae) 网络配置。`)) {
+    return
+  }
+  activatingConfig.value = true
+  try {
+    const res = await fetch('/api/configs/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: target })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      alert(`生效成功！\n${data.message || ''}`)
+      await fetchConfigProfiles()
+      await loadConfig(target)
+    } else {
+      alert('生效失败: ' + (data.error || '') + '\n' + (data.details || ''))
+    }
+  } catch (e: any) {
+    alert('请求失败: ' + e.message)
+  } finally {
+    activatingConfig.value = false
+  }
+}
+
+function openCreateProfileModal() {
+  newProfileName.value = ''
+  showNewProfileModal.value = true
+}
+
+async function createNewProfile() {
+  const name = newProfileName.value.trim()
+  if (!name) {
+    alert('请输入配置文件名称')
+    return
+  }
+  try {
+    const res = await fetch('/api/configs/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content: configContent.value })
+    })
+    const data = await res.json()
+    if (res.ok) {
+      showNewProfileModal.value = false
+      alert(`配置文件 [${data.name}] 创建成功！`)
+      await fetchConfigProfiles()
+      await handleSelectProfile(data.name)
+    } else {
+      alert('创建失败: ' + (data.error || '') + '\n' + (data.details || ''))
+    }
+  } catch (e: any) {
+    alert('请求失败: ' + e.message)
+  }
+}
+
+async function deleteProfile(name: string) {
+  if (name === activeRunningConfig.value) {
+    alert('当前运行中的主配置不能删除！')
+    return
+  }
+  if (!confirm(`确认删除配置文件 [${name}] 吗？`)) return
+  try {
+    const res = await fetch(`/api/configs/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    const data = await res.json()
+    if (res.ok) {
+      alert('删除成功！')
+      await fetchConfigProfiles()
+      if (currentSelectedConfig.value === name) {
+        await handleSelectProfile(activeRunningConfig.value)
+      }
+    } else {
+      alert('删除失败: ' + (data.error || ''))
+    }
+  } catch (e: any) {
+    alert('请求错误: ' + e.message)
+  }
+}
+
 async function switchMode(mode: Mode) {
   if (currentMode.value === mode) return
 
   if (mode === 'code') {
-    // Sync model to code
     await syncModelToCode()
     currentMode.value = 'code'
     setTimeout(() => {
       initEditor(configContent.value)
     }, 50)
   } else {
-    // Sync code to model
     currentMode.value = 'form'
-    await loadConfig()
+    await loadConfig(currentSelectedConfig.value)
   }
 }
 
@@ -319,10 +445,11 @@ async function saveConfig() {
 
   saving.value = true
   try {
-    const res = await fetch('/api/config', {
+    const res = await fetch(`/api/config?name=${encodeURIComponent(currentSelectedConfig.value)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        name: currentSelectedConfig.value,
         content: configContent.value,
         autoBackup: autoBackup.value,
         reloadConfig: reloadAfterSave.value
@@ -331,8 +458,8 @@ async function saveConfig() {
     const data = await res.json()
     if (res.ok) {
       isDirty.value = false
-      alert('保存成功！' + (data.reloaded ? ' (dae 服务已自动热重载)' : ''))
-      loadConfig()
+      alert(`保存成功！[${currentSelectedConfig.value}]` + (data.reloaded ? ' (dae 服务已自动热重载)' : ''))
+      loadConfig(currentSelectedConfig.value)
     } else {
       alert('保存失败: ' + (data.error || '') + '\n' + (data.details || ''))
     }
@@ -666,10 +793,63 @@ onMounted(() => {
           </button>
         </div>
 
-        <div class="file-badge">
-          <FileCode class="icon" :size="15" />
-          <span class="file-name">{{ configPath ? configPath.split('/').pop() : 'config.mock.dae' }}</span>
-          <span v-if="isDirty" class="dirty-dot" title="有未保存修改">●</span>
+        <!-- Config Profile Selector -->
+        <div class="profile-selector-group">
+          <div class="profile-select-wrapper">
+            <Files class="icon text-muted" :size="14" />
+            <select
+              :value="currentSelectedConfig"
+              @change="handleSelectProfile(($event.target as HTMLSelectElement).value)"
+              class="profile-select"
+              title="切换当前编辑的配置文件方案"
+            >
+              <option
+                v-for="p in configProfiles"
+                :key="p.name"
+                :value="p.name"
+              >
+                {{ p.name }} {{ p.isActive ? ' [当前生效]' : '' }}
+              </option>
+            </select>
+            <span v-if="isDirty" class="dirty-dot" title="有未保存修改">●</span>
+          </div>
+
+          <!-- 生效状态标签 / 一键生效按钮 -->
+          <span
+            v-if="currentSelectedConfig === activeRunningConfig"
+            class="badge-active"
+            title="该配置方案当前正在作为主服务运行生效"
+          >
+            <span class="active-indicator"></span>已生效
+          </span>
+          <button
+            v-else
+            class="btn btn-sm btn-activate"
+            :disabled="activatingConfig"
+            @click="activateSelectedProfile(currentSelectedConfig)"
+            title="将该配置应用到主运行配置并热重载生效"
+          >
+            <Check :size="13" />
+            <span>{{ activatingConfig ? '生效中...' : '一键生效' }}</span>
+          </button>
+
+          <!-- 新建与删除按钮 -->
+          <button
+            class="btn-icon-subtle"
+            @click="openCreateProfileModal"
+            title="新建配置文件方案 (基于当前模板克隆)"
+          >
+            <Plus :size="14" />
+          </button>
+
+          <button
+            v-if="currentSelectedConfig !== activeRunningConfig"
+            class="btn-icon-subtle danger"
+            @click="deleteProfile(currentSelectedConfig)"
+            title="删除当前选中的从属配置文件"
+          >
+            <Trash2 :size="14" />
+          </button>
         </div>
       </div>
 
@@ -1021,7 +1201,7 @@ onMounted(() => {
 
       <div class="status-right">
         <span>修改时间: {{ formatDate(lastModTime) }}</span>
-        <button class="btn-text" @click="loadConfig" title="重新从磁盘读取">
+        <button class="btn-text" @click="() => loadConfig()" title="重新从磁盘读取">
           <RefreshCw class="icon" :size="12" /> 重新载入
         </button>
       </div>
@@ -1199,6 +1379,31 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- New Profile Modal -->
+    <div v-if="showNewProfileModal" class="modal-backdrop" @click.self="showNewProfileModal = false">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3><Files class="icon" :size="18" /> 新建配置文件方案</h3>
+          <button class="close-btn" @click="showNewProfileModal = false">&times;</button>
+        </div>
+        <div class="modal-body form-modal">
+          <div class="field">
+            <label>配置文件名 (.dae)</label>
+            <input
+              v-model="newProfileName"
+              placeholder="例如: config.gaming.dae"
+              @keydown.enter="createNewProfile"
+            />
+            <span class="field-hint">将基于当前正在编辑的配置内容作为模板克隆创建，创建后可在列表中切换、独立编辑并一键生效。</span>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" @click="showNewProfileModal = false">取消</button>
+            <button class="btn btn-primary" @click="createNewProfile">创建方案</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1256,16 +1461,93 @@ onMounted(() => {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
-.file-badge {
+.profile-selector-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-select-wrapper {
   display: flex;
   align-items: center;
   gap: 6px;
   background: #1e293b;
-  padding: 4px 10px;
+  border: 1px solid #334155;
+  padding: 3px 8px;
   border-radius: 6px;
-  font-weight: 500;
+}
+
+.profile-select {
+  background: transparent;
+  border: none;
   color: #38bdf8;
   font-size: 13px;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+  padding-right: 4px;
+}
+
+.profile-select option {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.badge-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 4px;
+  color: #34d399;
+  font-size: 11px;
+  font-weight: 500;
+  user-select: none;
+}
+
+.active-indicator {
+  width: 6px;
+  height: 6px;
+  background: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.btn-activate {
+  background: #059669;
+  color: #fff;
+  border: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+.btn-activate:hover:not(:disabled) {
+  background: #047857;
+}
+
+.btn-icon-subtle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-icon-subtle:hover {
+  background: #334155;
+  color: #f1f5f9;
+}
+.btn-icon-subtle.danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
 }
 
 .dirty-dot {

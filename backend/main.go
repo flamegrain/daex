@@ -45,6 +45,14 @@ type BackupItem struct {
 	ModTime time.Time `json:"modTime"`
 }
 
+type ConfigProfile struct {
+	Name     string    `json:"name"`
+	Path     string    `json:"path"`
+	IsActive bool      `json:"isActive"`
+	Size     int64     `json:"size"`
+	ModTime  time.Time `json:"modTime"`
+}
+
 type NodeItem struct {
 	Key      string `json:"key"`
 	Protocol string `json:"protocol"`
@@ -389,27 +397,159 @@ func main() {
 		})
 	})
 
-	// 3. Config reading, saving, and validation
-	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
-		b, err := os.ReadFile(o.DaeConfig)
+	// 3. Config files list and profiles management
+	mux.HandleFunc("GET /api/configs", func(w http.ResponseWriter, r *http.Request) {
+		profiles, err := listConfigProfiles(o.DaeConfig)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
-		fi, _ := os.Stat(o.DaeConfig)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"configs":       profiles,
+			"currentActive": filepath.Base(o.DaeConfig),
+		})
+	})
+
+	mux.HandleFunc("POST /api/configs/activate", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name is required"})
+			return
+		}
+		targetPath := resolveProfilePath(o.DaeConfig, req.Name)
+		if _, err := os.Stat(targetPath); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "config file not found: " + req.Name})
+			return
+		}
+
+		// Read and validate before activating
+		b, err := os.ReadFile(targetPath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "cannot read target config: " + err.Error()})
+			return
+		}
+		valid, msg := validateDaeConfig(r.Context(), o.DaeBin, string(b))
+		if !valid {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "target config failed dae validation", "details": msg})
+			return
+		}
+
+		// Backup currently active config before replacing
+		_, _ = createBackupFile(o.DaeConfig, o.BackupDir, "pre-switch")
+
+		// Atomically overwrite active config file
+		if err := os.WriteFile(o.DaeConfig, b, 0600); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to overwrite active config: " + err.Error()})
+			return
+		}
+
+		// Reload dae service
+		reloaded := false
+		var reloadMsg string
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "systemctl", "reload", o.DaeService).CombinedOutput()
+		if err != nil {
+			reloadMsg = fmt.Sprintf("reload failed: %s", strings.TrimSpace(string(out)))
+		} else {
+			reloaded = true
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":        true,
+			"message":   fmt.Sprintf("已成功切换并生效配置 [%s]", req.Name),
+			"reloaded":  reloaded,
+			"reloadMsg": reloadMsg,
+		})
+	})
+
+	mux.HandleFunc("POST /api/configs/create", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name    string `json:"name"`
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name is required"})
+			return
+		}
+		name := strings.TrimSpace(req.Name)
+		if !strings.HasSuffix(name, ".dae") {
+			name += ".dae"
+		}
+		targetPath := resolveProfilePath(o.DaeConfig, name)
+
+		content := req.Content
+		if strings.TrimSpace(content) == "" {
+			// Copy from current active config as base template
+			b, _ := os.ReadFile(o.DaeConfig)
+			content = string(b)
+		}
+
+		valid, msg := validateDaeConfig(r.Context(), o.DaeBin, content)
+		if !valid {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "initial content failed dae validation", "details": msg})
+			return
+		}
+
+		if err := os.WriteFile(targetPath, []byte(content), 0600); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to create config file: " + err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":   true,
+			"name": filepath.Base(targetPath),
+		})
+	})
+
+	mux.HandleFunc("DELETE /api/configs/{name}", func(w http.ResponseWriter, r *http.Request) {
+		name := filepath.Base(r.PathValue("name"))
+		if name == filepath.Base(o.DaeConfig) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "禁止删除当前主运行配置文件"})
+			return
+		}
+		targetPath := resolveProfilePath(o.DaeConfig, name)
+		if err := os.Remove(targetPath); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	// 4. Config reading, saving, and validation
+	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
+		targetFile := o.DaeConfig
+		if qName := r.URL.Query().Get("name"); qName != "" {
+			targetFile = resolveProfilePath(o.DaeConfig, qName)
+		}
+
+		b, err := os.ReadFile(targetFile)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		fi, _ := os.Stat(targetFile)
 		modTime := time.Time{}
 		if fi != nil {
 			modTime = fi.ModTime()
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"path":    o.DaeConfig,
-			"content": string(b),
-			"modTime": modTime,
+			"path":     targetFile,
+			"name":     filepath.Base(targetFile),
+			"isActive": filepath.Base(targetFile) == filepath.Base(o.DaeConfig),
+			"content":  string(b),
+			"modTime":  modTime,
 		})
 	})
 
 	mux.HandleFunc("GET /api/config/model", func(w http.ResponseWriter, r *http.Request) {
-		b, err := os.ReadFile(o.DaeConfig)
+		targetFile := o.DaeConfig
+		if qName := r.URL.Query().Get("name"); qName != "" {
+			targetFile = resolveProfilePath(o.DaeConfig, qName)
+		}
+		b, err := os.ReadFile(targetFile)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
@@ -450,6 +590,7 @@ func main() {
 
 	mux.HandleFunc("POST /api/config", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
+			Name         string `json:"name"`
 			Content      string `json:"content"`
 			AutoBackup   bool   `json:"autoBackup"`
 			ReloadConfig bool   `json:"reloadConfig"`
@@ -457,6 +598,13 @@ func main() {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 			return
+		}
+
+		targetFile := o.DaeConfig
+		if req.Name != "" {
+			targetFile = resolveProfilePath(o.DaeConfig, req.Name)
+		} else if qName := r.URL.Query().Get("name"); qName != "" {
+			targetFile = resolveProfilePath(o.DaeConfig, qName)
 		}
 
 		valid, msg := validateDaeConfig(r.Context(), o.DaeBin, req.Content)
@@ -469,26 +617,27 @@ func main() {
 		}
 
 		if req.AutoBackup {
-			if _, err := createBackupFile(o.DaeConfig, o.BackupDir, "auto"); err != nil {
+			if _, err := createBackupFile(targetFile, o.BackupDir, "auto"); err != nil {
 				log.Printf("failed to create auto backup: %v", err)
 			}
 		}
 
-		tmpFile := o.DaeConfig + ".tmp"
+		tmpFile := targetFile + ".tmp"
 		if err := os.WriteFile(tmpFile, []byte(req.Content), 0600); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to write tmp file: " + err.Error()})
 			return
 		}
-		if err := os.Rename(tmpFile, o.DaeConfig); err != nil {
+		if err := os.Rename(tmpFile, targetFile); err != nil {
 			_ = os.Remove(tmpFile)
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to replace config: " + err.Error()})
 			return
 		}
-		_ = os.Chmod(o.DaeConfig, 0600)
+		_ = os.Chmod(targetFile, 0600)
 
+		isActive := filepath.Base(targetFile) == filepath.Base(o.DaeConfig)
 		reloaded := false
 		var reloadMsg string
-		if req.ReloadConfig {
+		if req.ReloadConfig && isActive {
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 			defer cancel()
 			out, err := exec.CommandContext(ctx, "systemctl", "reload", o.DaeService).CombinedOutput()
@@ -804,4 +953,76 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+func resolveProfilePath(activeConfig, name string) string {
+	name = filepath.Base(name)
+	if name == filepath.Base(activeConfig) {
+		return activeConfig
+	}
+	cfgDir := filepath.Dir(activeConfig)
+	subConfigsDir := filepath.Join(cfgDir, "configs")
+	target := filepath.Join(subConfigsDir, name)
+	if _, err := os.Stat(target); err == nil {
+		return target
+	}
+	// Fallback to parent dir or direct name in subConfigs
+	return target
+}
+
+func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
+	var list []ConfigProfile
+	seen := make(map[string]bool)
+
+	// 1. Current active config file
+	if fi, err := os.Stat(activeConfig); err == nil {
+		name := filepath.Base(activeConfig)
+		list = append(list, ConfigProfile{
+			Name:     name,
+			Path:     activeConfig,
+			IsActive: true,
+			Size:     fi.Size(),
+			ModTime:  fi.ModTime(),
+		})
+		seen[name] = true
+	}
+
+	// 2. Scan configs/ subdirectory
+	cfgDir := filepath.Dir(activeConfig)
+	subConfigsDir := filepath.Join(cfgDir, "configs")
+	_ = os.MkdirAll(subConfigsDir, 0700)
+
+	entries, err := os.ReadDir(subConfigsDir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".dae") {
+				continue
+			}
+			if seen[e.Name()] {
+				continue
+			}
+			fi, err := e.Info()
+			if err != nil {
+				continue
+			}
+			fullPath := filepath.Join(subConfigsDir, e.Name())
+			list = append(list, ConfigProfile{
+				Name:     e.Name(),
+				Path:     fullPath,
+				IsActive: false,
+				Size:     fi.Size(),
+				ModTime:  fi.ModTime(),
+			})
+			seen[e.Name()] = true
+		}
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].IsActive != list[j].IsActive {
+			return list[i].IsActive
+		}
+		return list[i].Name < list[j].Name
+	})
+
+	return list, nil
 }
