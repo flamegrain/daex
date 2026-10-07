@@ -526,13 +526,18 @@ html, body {
 [data-theme="light"] .workspace,
 [data-theme="light"] .home-dashboard,
 [data-theme="light"] .config-view,
-[data-theme="light"] .settings-view {
+[data-theme="light"] .settings-view,
+[data-theme="light"] .workspace-area,
+[data-theme="light"] .form-mode-container,
+[data-theme="light"] .form-section-body {
   background-color: #f8fafc !important;
   color: #0f172a !important;
 }
 
 [data-theme="light"] .settings-header,
-[data-theme="light"] .toolbar {
+[data-theme="light"] .toolbar,
+[data-theme="light"] .form-subnav,
+[data-theme="light"] .status-bar {
   background-color: #ffffff !important;
   border-bottom-color: #e2e8f0 !important;
 }
@@ -543,7 +548,10 @@ html, body {
 [data-theme="light"] .table-card,
 [data-theme="light"] .item-card,
 [data-theme="light"] .modal-card,
-[data-theme="light"] .status-card {
+[data-theme="light"] .status-card,
+[data-theme="light"] .nodes-section,
+[data-theme="light"] .form-grid,
+[data-theme="light"] .table-wrapper {
   background-color: #ffffff !important;
   border-color: #e2e8f0 !important;
   color: #0f172a !important;
@@ -700,5 +708,18 @@ html, body {
   background-color: #f8fafc !important;
   border-right-color: #e2e8f0 !important;
   color: #94a3b8 !important;
+}
+
+[data-theme="light"] .proto-tag,
+[data-theme="light"] .badge-mock,
+[data-theme="light"] .proto-badge-sm,
+[data-theme="light"] .code-tag,
+[data-theme="light"] .filter-chip {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .nodes-table {
+  background-color: #ffffff !important;
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import {
   Activity,
   ArrowUpRight,
@@ -14,6 +14,7 @@ import {
   RefreshCw
 } from 'lucide-vue-next'
 import * as echarts from 'echarts'
+import { theme } from '../composables/useSettings'
 
 interface NodeItem {
   key: string
@@ -97,6 +98,7 @@ function handleResize() {
 
 function updateCharts(data: any) {
   if (!data) return
+  const isLight = theme.value === 'light'
 
   // 1. Line chart for Traffic Speed
   if (speedChart && data.history) {
@@ -114,11 +116,11 @@ function updateCharts(data: any) {
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'axis',
-        backgroundColor: '#0f172a',
-        borderColor: '#1e293b',
-        textStyle: { color: '#e2e8f0', fontSize: 12 },
+        backgroundColor: isLight ? '#ffffff' : '#0f172a',
+        borderColor: isLight ? '#e2e8f0' : '#1e293b',
+        textStyle: { color: isLight ? '#0f172a' : '#e2e8f0', fontSize: 12 },
         formatter: (params: any) => {
-          let str = `<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">${params[0].axisValue}</div>`
+          let str = `<div style="font-size:11px;color:${isLight ? '#64748b' : '#94a3b8'};margin-bottom:4px">${params[0].axisValue}</div>`
           params.forEach((p: any) => {
             str += `<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">
               <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>
@@ -130,7 +132,7 @@ function updateCharts(data: any) {
       },
       legend: {
         data: ['下行速率 (MB/s)', '上行速率 (MB/s)'],
-        textStyle: { color: '#94a3b8', fontSize: 12 },
+        textStyle: { color: isLight ? '#475569' : '#94a3b8', fontSize: 12 },
         top: 0,
         right: 10
       },
@@ -145,14 +147,14 @@ function updateCharts(data: any) {
         type: 'category',
         boundaryGap: false,
         data: times,
-        axisLine: { lineStyle: { color: '#334155' } },
-        axisLabel: { color: '#64748b', fontSize: 11 }
+        axisLine: { lineStyle: { color: isLight ? '#e2e8f0' : '#334155' } },
+        axisLabel: { color: isLight ? '#64748b' : '#64748b', fontSize: 11 }
       },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        splitLine: { lineStyle: { color: '#1e293b' } },
-        axisLabel: { color: '#64748b', fontSize: 11, formatter: '{value} MB/s' }
+        splitLine: { lineStyle: { color: isLight ? '#f1f5f9' : '#1e293b' } },
+        axisLabel: { color: isLight ? '#64748b' : '#64748b', fontSize: 11, formatter: '{value} MB/s' }
       },
       series: [
         {
@@ -160,11 +162,11 @@ function updateCharts(data: any) {
           type: 'line',
           smooth: true,
           showSymbol: false,
-          itemStyle: { color: '#38bdf8' },
+          itemStyle: { color: '#0284c7' },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(56, 189, 248, 0.35)' },
-              { offset: 1, color: 'rgba(56, 189, 248, 0.0)' }
+              { offset: 0, color: isLight ? 'rgba(2, 132, 199, 0.25)' : 'rgba(56, 189, 248, 0.35)' },
+              { offset: 1, color: isLight ? 'rgba(2, 132, 199, 0.0)' : 'rgba(56, 189, 248, 0.0)' }
             ])
           },
           data: downData
@@ -177,7 +179,7 @@ function updateCharts(data: any) {
           itemStyle: { color: '#a855f7' },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(168, 85, 247, 0.3)' },
+              { offset: 0, color: 'rgba(168, 85, 247, 0.25)' },
               { offset: 1, color: 'rgba(168, 85, 247, 0.0)' }
             ])
           },
@@ -199,16 +201,16 @@ function updateCharts(data: any) {
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'item',
-        backgroundColor: '#0f172a',
-        borderColor: '#1e293b',
-        textStyle: { color: '#e2e8f0', fontSize: 12 },
+        backgroundColor: isLight ? '#ffffff' : '#0f172a',
+        borderColor: isLight ? '#e2e8f0' : '#1e293b',
+        textStyle: { color: isLight ? '#0f172a' : '#e2e8f0', fontSize: 12 },
         formatter: '{b}: <b>{c} 个节点</b> ({d}%)'
       },
       legend: {
         orient: 'vertical',
         right: '5%',
         top: 'center',
-        textStyle: { color: '#94a3b8', fontSize: 11 }
+        textStyle: { color: isLight ? '#475569' : '#94a3b8', fontSize: 11 }
       },
       series: [
         {
@@ -219,7 +221,7 @@ function updateCharts(data: any) {
           avoidLabelOverlap: false,
           itemStyle: {
             borderRadius: 6,
-            borderColor: '#0b1120',
+            borderColor: isLight ? '#ffffff' : '#0b1120',
             borderWidth: 2
           },
           label: { show: false },
@@ -228,7 +230,7 @@ function updateCharts(data: any) {
               show: true,
               fontSize: 12,
               fontWeight: 'bold',
-              color: '#f8fafc'
+              color: isLight ? '#0f172a' : '#f8fafc'
             }
           },
           data: pieData
@@ -238,6 +240,12 @@ function updateCharts(data: any) {
     countryChart.setOption(countryOption)
   }
 }
+
+watch(theme, () => {
+  if (dashboardData.value) {
+    updateCharts(dashboardData.value)
+  }
+})
 
 onMounted(() => {
   nextTick(() => {
@@ -431,11 +439,15 @@ onUnmounted(() => {
 .home-dashboard {
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px;
-  background: #090d16;
+  background: var(--bg-main, #090d16);
+  color: var(--text-main, #f8fafc);
   display: flex;
   flex-direction: column;
   gap: 20px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .dash-header {
@@ -448,22 +460,22 @@ onUnmounted(() => {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: #f8fafc;
+  color: var(--text-main, #f8fafc);
 }
 
 .dash-header .subtitle {
   margin: 4px 0 0;
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
 }
 
 .refresh-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #1e293b;
-  border: 1px solid #334155;
-  color: #94a3b8;
+  background: var(--bg-card, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  color: var(--text-muted, #94a3b8);
   padding: 6px 12px;
   border-radius: 20px;
   font-size: 12px;
@@ -471,8 +483,8 @@ onUnmounted(() => {
   transition: all 0.15s ease;
 }
 .refresh-pill:hover {
-  background: #334155;
-  color: #fff;
+  background: var(--border-color, #334155);
+  color: var(--text-main, #fff);
 }
 
 /* Metrics Grid */
@@ -483,13 +495,14 @@ onUnmounted(() => {
 }
 
 .metric-card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
   border-radius: 10px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  transition: background-color 0.2s, border-color 0.2s;
 }
 
 .metric-top {
@@ -500,7 +513,7 @@ onUnmounted(() => {
 
 .m-label {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-weight: 500;
 }
 
@@ -514,48 +527,48 @@ onUnmounted(() => {
 }
 .icon-circle.down {
   background: #0284c722;
-  color: #38bdf8;
+  color: #0284c7;
 }
 .icon-circle.up {
   background: #7e22ce22;
-  color: #c084fc;
+  color: #9333ea;
 }
 .icon-circle.status {
-  background: #064e3b33;
-  color: #34d399;
+  background: #064e3b22;
+  color: #10b981;
 }
 .icon-circle.node {
   background: #f59e0b22;
-  color: #fbbf24;
+  color: #d97706;
 }
 
 .metric-value {
   font-size: 22px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--text-main, #f8fafc);
   letter-spacing: -0.5px;
 }
 
 .metric-value.active-text {
-  color: #34d399;
+  color: #10b981;
   font-size: 18px;
 }
 
 .metric-value .unit {
   font-size: 13px;
   font-weight: 400;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
 }
 
 .metric-sub {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   display: flex;
   align-items: center;
   gap: 6px;
 }
 .metric-sub .sep {
-  color: #334155;
+  color: var(--border-color, #334155);
 }
 
 /* Charts Grid */
@@ -566,13 +579,14 @@ onUnmounted(() => {
 }
 
 .chart-card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
   border-radius: 10px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   height: 310px;
+  transition: background-color 0.2s, border-color 0.2s;
 }
 
 .card-head {
@@ -588,17 +602,17 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--text-main, #e2e8f0);
 }
 
 .h-icon {
-  color: #38bdf8;
+  color: #0284c7;
 }
 
 .tag.live {
   font-size: 11px;
-  color: #34d399;
-  background: #064e3b33;
+  color: #10b981;
+  background: #064e3b22;
   padding: 2px 8px;
   border-radius: 12px;
 }
@@ -611,13 +625,14 @@ onUnmounted(() => {
 
 /* Nodes Table Section */
 .nodes-section {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
   border-radius: 10px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: background-color 0.2s, border-color 0.2s;
 }
 
 .section-head {
@@ -628,29 +643,18 @@ onUnmounted(() => {
 
 .badge-mock {
   font-size: 11px;
-  background: #1e293b;
-  border: 1px solid #334155;
-  color: #94a3b8;
+  background: var(--bg-input, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  color: var(--text-muted, #94a3b8);
   padding: 2px 8px;
   border-radius: 4px;
-}
-
-.home-dashboard {
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 24px;
-  background: #090d16;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  max-width: 100%;
-  box-sizing: border-box;
 }
 
 .table-wrapper {
   width: 100%;
   overflow-x: hidden;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #1e293b);
 }
 
 .nodes-table {
@@ -658,21 +662,23 @@ onUnmounted(() => {
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
+  background: var(--bg-card, #0f172a);
 }
 
 .nodes-table th {
   text-align: left;
-  padding: 8px 10px;
-  color: #64748b;
-  border-bottom: 1px solid #1e293b;
+  padding: 10px;
+  color: var(--text-muted, #64748b);
+  background: var(--bg-input, #0b1120);
+  border-bottom: 1px solid var(--border-color, #1e293b);
   font-weight: 500;
   white-space: nowrap;
 }
 
 .nodes-table td {
   padding: 10px;
-  border-bottom: 1px solid #1e293b55;
-  color: #cbd5e1;
+  border-bottom: 1px solid var(--border-color, #1e293b55);
+  color: var(--text-main, #cbd5e1);
   vertical-align: middle;
 }
 
@@ -689,15 +695,15 @@ onUnmounted(() => {
 }
 
 .row-active {
-  background: rgba(56, 189, 248, 0.03);
+  background: rgba(2, 132, 199, 0.06);
 }
 
 .active-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: #064e3b44;
-  color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
   padding: 2px 8px;
   border-radius: 12px;
   font-size: 11px;
@@ -708,7 +714,7 @@ onUnmounted(() => {
 .standby-pill {
   display: inline-flex;
   align-items: center;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-size: 11px;
   padding: 2px 6px;
   white-space: nowrap;
@@ -736,12 +742,13 @@ onUnmounted(() => {
 .key-tag {
   font-family: monospace;
   font-size: 10px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
 }
 
 .proto-tag {
-  background: #1e293b;
-  color: #38bdf8;
+  background: var(--bg-input, #1e293b);
+  color: #0284c7;
+  border: 1px solid var(--border-color, #334155);
   padding: 2px 6px;
   border-radius: 4px;
   font-weight: 600;
@@ -753,7 +760,7 @@ onUnmounted(() => {
 
 .addr-cell {
   overflow: hidden;
-  color: #94a3b8;
+  color: var(--text-muted, #94a3b8);
 }
 
 .latency {
@@ -762,12 +769,12 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .latency.fast {
-  color: #34d399;
+  color: #10b981;
 }
 .latency.medium {
-  color: #fbbf24;
+  color: #d97706;
 }
 .latency.slow {
-  color: #f87171;
+  color: #ef4444;
 }
 </style>
