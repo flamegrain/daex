@@ -13,6 +13,7 @@ import {
 } from 'lucide-vue-next'
 import ConfigView from './views/ConfigView.vue'
 import DashboardView from './views/DashboardView.vue'
+import NodesView from './views/NodesView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { t, theme, applyTheme } from './composables/useSettings'
 
@@ -171,13 +172,7 @@ onMounted(() => {
     <main class="workspace">
       <DashboardView v-if="activeTab === 'home'" />
       <ConfigView v-else-if="activeTab === 'config'" />
-
-      <!-- Placeholder Views for Next Steps -->
-      <div v-else-if="activeTab === 'nodes'" class="placeholder-view">
-        <Server :size="48" class="ph-icon" />
-        <h3>节点与订阅组视图（下一步开发中）</h3>
-        <p>将基于工作区 <code>config.mock.dae</code> 实时解析展示 node/group/subscription，并提供测速与分流调试。</p>
-      </div>
+      <NodesView v-else-if="activeTab === 'nodes'" />
 
       <div v-else-if="activeTab === 'logs'" class="placeholder-view">
         <Terminal :size="48" class="ph-icon" />
@@ -526,6 +521,7 @@ html, body {
 [data-theme="light"] .workspace,
 [data-theme="light"] .home-dashboard,
 [data-theme="light"] .config-view,
+[data-theme="light"] .nodes-view,
 [data-theme="light"] .settings-view,
 [data-theme="light"] .workspace-area,
 [data-theme="light"] .form-mode-container,
@@ -535,6 +531,7 @@ html, body {
 }
 
 [data-theme="light"] .settings-header,
+[data-theme="light"] .view-header,
 [data-theme="light"] .toolbar,
 [data-theme="light"] .form-subnav,
 [data-theme="light"] .status-bar {
@@ -550,6 +547,10 @@ html, body {
 [data-theme="light"] .modal-card,
 [data-theme="light"] .status-card,
 [data-theme="light"] .nodes-section,
+[data-theme="light"] .stat-card,
+[data-theme="light"] .group-card,
+[data-theme="light"] .sub-card,
+[data-theme="light"] .simulator-modal,
 [data-theme="light"] .form-grid,
 [data-theme="light"] .table-wrapper {
   background-color: #ffffff !important;

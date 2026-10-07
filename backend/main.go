@@ -419,6 +419,49 @@ func main() {
 		})
 	})
 
+	// 2.1 Nodes and Policies overview based on active config
+	mux.HandleFunc("GET /api/nodes/overview", func(w http.ResponseWriter, r *http.Request) {
+		overview, err := getNodesOverview(o.DaeConfig)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, overview)
+	})
+
+	// 2.2 Node ping latency test
+	mux.HandleFunc("POST /api/nodes/ping", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Keys []string `json:"keys"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		results, ts, err := pingNodes(req.Keys, o.DaeConfig)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":           true,
+			"results":      results,
+			"lastTestedAt": ts,
+		})
+	})
+
+	// 2.3 Routing simulation and trace
+	mux.HandleFunc("POST /api/routing/trace", func(w http.ResponseWriter, r *http.Request) {
+		var req RouteTraceRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid trace request"})
+			return
+		}
+		traceResult, err := traceRouting(req, o.DaeConfig)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, traceResult)
+	})
+
 	// 3. Config files list and profiles management
 	mux.HandleFunc("GET /api/configs", func(w http.ResponseWriter, r *http.Request) {
 		profiles, err := listConfigProfiles(o.DaeConfig)
