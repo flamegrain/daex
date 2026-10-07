@@ -378,13 +378,13 @@ onUnmounted(() => {
         <table class="nodes-table">
           <thead>
             <tr>
-              <th>状态</th>
-              <th>国家/地区</th>
-              <th>节点名称 (Alias)</th>
-              <th>协议</th>
-              <th>目标地址 (Address)</th>
-              <th>端口</th>
-              <th>延迟 (Ping)</th>
+              <th style="width: 90px">状态</th>
+              <th style="width: 110px">国家/地区</th>
+              <th style="width: 25%">节点名称 (Alias)</th>
+              <th style="width: 80px">协议</th>
+              <th style="width: 30%">目标地址 (Address)</th>
+              <th style="width: 70px">端口</th>
+              <th style="width: 90px">延迟 (Ping)</th>
             </tr>
           </thead>
           <tbody>
@@ -397,17 +397,19 @@ onUnmounted(() => {
               </td>
               <td class="country-cell">
                 <span class="flag">{{ node.flag }}</span>
-                <span>{{ node.country }}</span>
+                <span class="truncate-text" :title="node.country">{{ node.country }}</span>
               </td>
               <td class="name-cell">
-                <b>{{ node.name }}</b>
-                <span class="key-tag">{{ node.key }}</span>
+                <b class="truncate-text" :title="node.name">{{ node.name }}</b>
+                <span class="key-tag truncate-text" :title="node.key">{{ node.key }}</span>
               </td>
               <td>
                 <span class="proto-tag">{{ node.protocol }}</span>
               </td>
-              <td class="addr-cell">{{ node.address }}</td>
-              <td>{{ node.port }}</td>
+              <td class="addr-cell">
+                <span class="truncate-text mono" :title="node.address">{{ node.address }}</span>
+              </td>
+              <td class="mono">{{ node.port }}</td>
               <td>
                 <span class="latency" :class="{
                   fast: node.latency < 50,
@@ -633,28 +635,57 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
+.home-dashboard {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px;
+  background: #090d16;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 .table-wrapper {
-  overflow-x: auto;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .nodes-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12px;
 }
 
 .nodes-table th {
   text-align: left;
-  padding: 8px 12px;
+  padding: 8px 10px;
   color: #64748b;
   border-bottom: 1px solid #1e293b;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .nodes-table td {
-  padding: 10px 12px;
+  padding: 10px;
   border-bottom: 1px solid #1e293b55;
   color: #cbd5e1;
+  vertical-align: middle;
+}
+
+.truncate-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .row-active {
@@ -671,6 +702,7 @@ onUnmounted(() => {
   border-radius: 12px;
   font-size: 11px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .standby-pill {
@@ -679,22 +711,26 @@ onUnmounted(() => {
   color: #64748b;
   font-size: 11px;
   padding: 2px 6px;
+  white-space: nowrap;
 }
 
 .country-cell {
   display: flex;
   align-items: center;
   gap: 6px;
+  overflow: hidden;
 }
 
 .country-cell .flag {
   font-size: 16px;
+  flex-shrink: 0;
 }
 
 .name-cell {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  overflow: hidden;
 }
 
 .key-tag {
@@ -711,16 +747,19 @@ onUnmounted(() => {
   font-weight: 600;
   font-size: 10px;
   font-family: monospace;
+  display: inline-block;
+  white-space: nowrap;
 }
 
 .addr-cell {
-  font-family: monospace;
+  overflow: hidden;
   color: #94a3b8;
 }
 
 .latency {
   font-family: monospace;
   font-weight: 600;
+  white-space: nowrap;
 }
 .latency.fast {
   color: #34d399;

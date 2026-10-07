@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -202,6 +203,21 @@ func parseMockNodes(configContent string) []NodeItem {
 	return nodes
 }
 
+func base64DecodeString(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	// Support standard or raw standard or URL encoding
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	if b, err := base64.RawStdEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	if b, err := base64.URLEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	return base64.RawURLEncoding.DecodeString(s)
+}
+
 func parseNodeURL(key, rawURL string) NodeItem {
 	item := NodeItem{
 		Key:     key,
@@ -216,15 +232,42 @@ func parseNodeURL(key, rawURL string) NodeItem {
 	u, err := url.Parse(rawURL)
 	if err == nil {
 		item.Protocol = strings.ToUpper(u.Scheme)
-		if u.Fragment != "" {
-			item.Name, _ = url.QueryUnescape(u.Fragment)
-		}
-		host := u.Hostname()
-		if host != "" {
-			item.Address = host
-		}
-		if u.Port() != "" {
-			item.Port = u.Port()
+		if item.Protocol == "VMESS" {
+			// parse vmess schema
+			prefix := "vmess" + "://"
+			b64 := strings.TrimPrefix(rawURL, prefix)
+			if decoded, decErr := base64DecodeString(b64); decErr == nil {
+				var vm struct {
+					Ps   string      `json:"ps"`
+					Add  string      `json:"add"`
+					Port interface{} `json:"port"`
+				}
+				if json.Unmarshal(decoded, &vm) == nil {
+					if vm.Ps != "" {
+						item.Name = vm.Ps
+					}
+					if vm.Add != "" {
+						item.Address = vm.Add
+					}
+					switch p := vm.Port.(type) {
+					case string:
+						item.Port = p
+					case float64:
+						item.Port = strconv.Itoa(int(p))
+					}
+				}
+			}
+		} else {
+			if u.Fragment != "" {
+				item.Name, _ = url.QueryUnescape(u.Fragment)
+			}
+			host := u.Hostname()
+			if host != "" {
+				item.Address = host
+			}
+			if u.Port() != "" {
+				item.Port = u.Port()
+			}
 		}
 	} else {
 		proto, _, _ := strings.Cut(rawURL, "://")
