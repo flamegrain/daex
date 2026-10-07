@@ -747,4 +747,30 @@ html, body {
 [data-theme="light"] .nodes-table {
   background-color: #ffffff !important;
 }
+
+[data-theme="light"] .connectivity-item {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .connectivity-item:hover {
+  background-color: #f1f5f9 !important;
+  border-color: #0284c7 !important;
+}
+
+[data-theme="light"] .connectivity-card .latency-badge {
+  background-color: #f1f5f9 !important;
+}
+
+[data-theme="light"] .btn-test-icon {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #64748b !important;
+}
+
+[data-theme="light"] .btn-test-icon:hover:not(:disabled) {
+  background-color: #0284c7 !important;
+  border-color: #0284c7 !important;
+  color: #ffffff !important;
+}
 </style>

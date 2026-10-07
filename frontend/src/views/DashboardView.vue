@@ -439,12 +439,12 @@ onUnmounted(() => {
         <div class="chart-container" ref="speedChartEl"></div>
       </div>
 
-      <!-- Connectivity Quick Check Panel (Right) -->
+      <!-- Connectivity Quick Check Panel (Right, exactly aligned with 4th card above) -->
       <div class="chart-card connectivity-card">
         <div class="card-head">
           <div class="head-title">
             <Gauge class="h-icon" :size="16" />
-            <span>连通性快速检测面板</span>
+            <span>连通性快速检测</span>
           </div>
           <button
             class="btn-test-all"
@@ -453,7 +453,7 @@ onUnmounted(() => {
             title="一键测试所有常用服务连通性与分流状态"
           >
             <Zap :size="12" :class="{ spin: testingAll }" />
-            <span>{{ testingAll ? '正在全量检测...' : '一键全部检测' }}</span>
+            <span>{{ testingAll ? '检测中...' : '一键检测' }}</span>
           </button>
         </div>
 
@@ -498,7 +498,7 @@ onUnmounted(() => {
             <!-- Target Detail Info -->
             <div class="target-meta">
               <div class="target-title-row">
-                <span class="target-name">{{ item.name }}</span>
+                <span class="target-name">{{ item.name.replace('访问检测', '') }}</span>
                 <span
                   class="route-pill"
                   :class="{
@@ -507,13 +507,11 @@ onUnmounted(() => {
                     ai: item.expectedOut.includes('解锁')
                   }"
                 >
-                  {{ item.expectedOut }}
+                  {{ item.expectedOut.replace(' (direct)', '').replace(' (proxy)', '') }}
                 </span>
               </div>
               <div class="target-sub-row">
                 <span class="target-url mono">{{ item.url.replace('https://', '').split('/')[0] }}</span>
-                <span class="sep">·</span>
-                <span class="target-desc">{{ item.message }}</span>
               </div>
             </div>
 
@@ -532,18 +530,17 @@ onUnmounted(() => {
                 {{ item.latency }} ms
               </span>
 
-              <!-- Test Button -->
+              <!-- Test Button (Icon button) -->
               <button
-                class="btn-test-single"
+                class="btn-test-icon"
                 :disabled="testingTargets[item.id] || testingAll"
                 @click="testTarget(item.id)"
                 :title="`重新测试 ${item.name}`"
               >
                 <RefreshCw
-                  :size="12"
+                  :size="11"
                   :class="{ spin: testingTargets[item.id] }"
                 />
-                <span>{{ testingTargets[item.id] ? '检测中' : '检测' }}</span>
               </button>
             </div>
           </div>
@@ -664,10 +661,10 @@ onUnmounted(() => {
   border-color: #0284c7;
 }
 
-/* Top Metrics Cards */
+/* Top Metrics Cards (4 columns) */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -679,6 +676,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .metric-top {
@@ -750,15 +748,37 @@ onUnmounted(() => {
   opacity: 0.4;
 }
 
-/* Charts Grid */
+/* Charts Grid (Alighed 4 columns: Speed Card 3 columns, Connectivity Card 1 column) */
 .charts-grid {
   display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
-@media (max-width: 960px) {
+.speed-card {
+  grid-column: span 3;
+}
+
+.connectivity-card {
+  grid-column: span 1;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .speed-card,
+  .connectivity-card {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .metrics-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -838,12 +858,13 @@ onUnmounted(() => {
 .connectivity-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
+  gap: 8px;
+  padding: 6px 9px;
   background: var(--bg-input, #090d16);
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 6px;
   transition: all 0.15s ease;
+  min-width: 0;
 }
 
 .connectivity-item:hover {
@@ -857,8 +878,8 @@ onUnmounted(() => {
 
 /* Brand Icons */
 .brand-icon-box {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   display: flex;
   align-items: center;
@@ -867,8 +888,8 @@ onUnmounted(() => {
 }
 
 .svg-icon {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
 }
 
 .brand-icon-box.aliyun {
@@ -907,7 +928,8 @@ onUnmounted(() => {
 .target-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  min-width: 0;
 }
 
 .target-name {
@@ -918,8 +940,8 @@ onUnmounted(() => {
 }
 
 .route-pill {
-  font-size: 10px;
-  padding: 1px 6px;
+  font-size: 9px;
+  padding: 1px 5px;
   border-radius: 10px;
   font-weight: 500;
   white-space: nowrap;
@@ -943,8 +965,8 @@ onUnmounted(() => {
 .target-sub-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 4px;
+  font-size: 10px;
   color: var(--text-muted, #64748b);
   white-space: nowrap;
   overflow: hidden;
@@ -953,7 +975,7 @@ onUnmounted(() => {
 
 .target-url {
   color: var(--text-muted, #94a3b8);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .target-desc {
@@ -965,7 +987,7 @@ onUnmounted(() => {
 .target-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
 }
 
@@ -976,9 +998,10 @@ onUnmounted(() => {
   font-size: 11px;
   font-family: monospace;
   font-weight: 600;
-  padding: 2px 7px;
+  padding: 2px 6px;
   border-radius: 10px;
   background: var(--bg-card, #0f172a);
+  white-space: nowrap;
 }
 
 .latency-badge .dot {
@@ -1009,6 +1032,33 @@ onUnmounted(() => {
 
 .latency-badge.slow .dot {
   background: #ef4444;
+}
+
+.btn-test-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #334155);
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.btn-test-icon:hover:not(:disabled) {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+}
+
+.btn-test-icon:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-test-single {
