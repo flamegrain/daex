@@ -138,10 +138,12 @@ const routeModalMode = ref<'add' | 'edit'>('add')
 const editingRoute = ref<{
   condition: string
   target: string
+  customTarget: string
   index: number
 }>({
   condition: '',
   target: 'proxy',
+  customTarget: '',
   index: -1
 })
 
@@ -450,6 +452,7 @@ function openAddRoute() {
   editingRoute.value = {
     condition: 'domain(geosite:custom)',
     target: 'proxy',
+    customTarget: '',
     index: -1
   }
   showRouteModal.value = true
@@ -457,22 +460,37 @@ function openAddRoute() {
 
 function openEditRoute(r: ConfigRouteRule, idx: number) {
   routeModalMode.value = 'edit'
+  const knownBuiltins = ['direct', 'must_direct', 'block', 'proxy']
+  const groupNames = configModel.value.groups.map(g => g.name)
+  let targetVal = r.target
+  let customVal = ''
+
+  if (!knownBuiltins.includes(r.target) && !groupNames.includes(r.target)) {
+    targetVal = '__custom__'
+    customVal = r.target
+  }
+
   editingRoute.value = {
     condition: r.condition,
-    target: r.target,
+    target: targetVal,
+    customTarget: customVal,
     index: idx
   }
   showRouteModal.value = true
 }
 
 function saveRouteModal() {
-  if (!editingRoute.value.condition || !editingRoute.value.target) {
+  let finalTarget = editingRoute.value.target
+  if (finalTarget === '__custom__') {
+    finalTarget = editingRoute.value.customTarget.trim()
+  }
+  if (!editingRoute.value.condition || !finalTarget) {
     alert('分流匹配条件与目标出口动作不能为空')
     return
   }
   const item: ConfigRouteRule = {
-    condition: editingRoute.value.condition,
-    target: editingRoute.value.target
+    condition: editingRoute.value.condition.trim(),
+    target: finalTarget
   }
   if (routeModalMode.value === 'add') {
     configModel.value.routingRules.push(item)
@@ -1080,8 +1098,26 @@ onMounted(() => {
             <input v-model="editingRoute.condition" placeholder="domain(geosite:google) 或 dip(geoip:cn)" />
           </div>
           <div class="field">
-            <label>目标动作 (Target)</label>
-            <input v-model="editingRoute.target" placeholder="direct, block, proxy 或策略组名" />
+            <label>目标动作 (Target / 出口分流)</label>
+            <select v-model="editingRoute.target">
+              <optgroup label="内置动作 (Built-in Actions)">
+                <option value="direct">direct (直接放行 / 直连)</option>
+                <option value="must_direct">must_direct (强制直连 / 绕过代理)</option>
+                <option value="block">block (阻断连接 / 丢弃)</option>
+              </optgroup>
+              <optgroup label="代理策略组 (Proxy Groups)">
+                <option v-for="g in configModel.groups" :key="g.name" :value="g.name">
+                  {{ g.name }} (出站组: {{ g.policy }})
+                </option>
+              </optgroup>
+              <optgroup label="高级 / 自定义">
+                <option value="__custom__">自定义动作 / 组名...</option>
+              </optgroup>
+            </select>
+          </div>
+          <div v-if="editingRoute.target === '__custom__'" class="field">
+            <label>输入自定义目标出口名称</label>
+            <input v-model="editingRoute.customTarget" placeholder="输入合法的动作或组名" />
           </div>
           <div class="modal-actions">
             <button class="btn btn-secondary" @click="showRouteModal = false">取消</button>
