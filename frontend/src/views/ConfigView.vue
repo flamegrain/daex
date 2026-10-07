@@ -1072,7 +1072,7 @@ onMounted(() => {
             @click="activeSection = 'nodes'"
           >
             <Server :size="15" />
-            <span>节点配置 (node)</span>
+            <span>节点配置</span>
             <span class="count-pill">{{ configModel.nodes.length }}</span>
           </button>
           <button
@@ -1081,7 +1081,7 @@ onMounted(() => {
             @click="activeSection = 'groups'"
           >
             <Layers :size="15" />
-            <span>代理组与策略 (group)</span>
+            <span>策略组</span>
             <span class="count-pill">{{ configModel.groups.length }}</span>
           </button>
           <button
@@ -1090,7 +1090,7 @@ onMounted(() => {
             @click="activeSection = 'routing'"
           >
             <GitFork :size="15" />
-            <span>分流规则 (routing)</span>
+            <span>分流规则</span>
             <span class="count-pill">{{ configModel.routingRules.length }}</span>
           </button>
           <button
@@ -1099,7 +1099,7 @@ onMounted(() => {
             @click="activeSection = 'global'"
           >
             <Sliders :size="15" />
-            <span>全局参数 (global)</span>
+            <span>全局参数</span>
           </button>
           <button
             class="subnav-item"
@@ -1107,7 +1107,7 @@ onMounted(() => {
             @click="activeSection = 'subscriptions'"
           >
             <Download :size="15" />
-            <span>订阅管理 (subscription)</span>
+            <span>订阅管理</span>
             <span class="count-pill">{{ configModel.subscriptions.length }}</span>
           </button>
         </div>
@@ -1126,7 +1126,7 @@ onMounted(() => {
 
           <div v-if="configModel.nodes.length === 0" class="empty-state-box">
             <Server class="empty-icon" :size="36" />
-            <div class="empty-text">当前配置文件中暂无代理节点 (node)</div>
+            <div class="empty-text">当前配置文件中暂无代理节点</div>
             <p class="empty-subtext">你可以点击下方按钮添加节点，或在顶部切换其他配置文件</p>
             <button class="btn btn-primary btn-sm" @click="openAddNode">
               <Plus :size="13" /> 添加新节点
@@ -1165,7 +1165,7 @@ onMounted(() => {
         <div v-else-if="activeSection === 'groups'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>出站策略与分组 (group)</h3>
+              <h3>出站策略与分组</h3>
               <p>定义各分组策略：<code>min_moving_avg</code>、<code>min_avg10</code>、<code>fixed</code>、<code>random</code> 等</p>
             </div>
             <button class="btn btn-primary" @click="openAddGroup">
@@ -1175,7 +1175,7 @@ onMounted(() => {
 
           <div v-if="configModel.groups.length === 0" class="empty-state-box">
             <Layers class="empty-icon" :size="36" />
-            <div class="empty-text">当前配置文件中暂无策略组 (group)</div>
+            <div class="empty-text">当前配置文件中暂无策略组</div>
             <p class="empty-subtext">定义分组策略与过滤规则，聚合节点出站流量</p>
             <button class="btn btn-primary btn-sm" @click="openAddGroup">
               <Plus :size="13" /> 添加策略组
@@ -1218,7 +1218,7 @@ onMounted(() => {
         <div v-else-if="activeSection === 'routing'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>分流与路由规则 (routing)</h3>
+              <h3>分流与路由规则</h3>
               <p>匹配流量特征（geosite, geoip, dip, dport, pname 等）并指定动作 (direct, block, 或策略组)</p>
             </div>
             <button class="btn btn-primary" @click="openAddRoute">
@@ -1228,7 +1228,7 @@ onMounted(() => {
 
           <div v-if="configModel.routingRules.length === 0" class="empty-state-box">
             <GitFork class="empty-icon" :size="36" />
-            <div class="empty-text">当前配置文件中暂无分流规则 (routing)</div>
+            <div class="empty-text">当前配置文件中暂无分流规则</div>
             <p class="empty-subtext">设置域名、IP、端口等分流匹配条件与出站动作</p>
             <button class="btn btn-primary btn-sm" @click="openAddRoute">
               <Plus :size="13" /> 添加路由规则
@@ -1240,8 +1240,8 @@ onMounted(() => {
               <thead>
                 <tr>
                   <th style="width: 50px">#</th>
-                  <th>匹配条件 (Match Condition)</th>
-                  <th style="width: 140px">动作 / 目标出口</th>
+                  <th>匹配条件</th>
+                  <th style="width: 140px">动作出口</th>
                   <th style="width: 90px; text-align: right">操作</th>
                 </tr>
               </thead>
@@ -1249,7 +1249,7 @@ onMounted(() => {
                 <tr v-for="(rule, idx) in configModel.routingRules" :key="idx">
                   <td class="idx-cell">{{ idx + 1 }}</td>
                   <td class="mono cond-cell">
-                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">fallback (兜底)</span>
+                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">兜底路由</span>
                     <span v-else>{{ rule.condition }}</span>
                   </td>
                   <td>
@@ -1269,7 +1269,7 @@ onMounted(() => {
         <div v-else-if="activeSection === 'global'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>全局网络与代理模式参数 (global)</h3>
+              <h3>全局网络与代理模式</h3>
               <p>配置内核参数、代理端口、网络接口及连通性探测设置</p>
             </div>
           </div>
@@ -1334,7 +1334,7 @@ onMounted(() => {
         <div v-else-if="activeSection === 'subscriptions'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>远程订阅配置 (subscription)</h3>
+              <h3>远程订阅配置</h3>
               <p>绑定外部订阅文件，可在策略组中通过 <code>subtag(标签名)</code> 统一过滤节点</p>
             </div>
             <button class="btn btn-primary" @click="openAddSub">
@@ -1344,7 +1344,7 @@ onMounted(() => {
 
           <div v-if="configModel.subscriptions.length === 0" class="empty-state-box">
             <Download class="empty-icon" :size="36" />
-            <div class="empty-text">当前配置文件中暂无订阅源 (subscription)</div>
+            <div class="empty-text">当前配置文件中暂无订阅源</div>
             <p class="empty-subtext">配置远程订阅链接，可自动在策略组中过滤提取节点</p>
             <button class="btn btn-primary btn-sm" @click="openAddSub">
               <Plus :size="13" /> 添加订阅

@@ -13,8 +13,10 @@ import {
 } from 'lucide-vue-next'
 import ConfigView from './views/ConfigView.vue'
 import DashboardView from './views/DashboardView.vue'
+import SettingsView from './views/SettingsView.vue'
+import { t } from './composables/useSettings'
 
-type Tab = 'home' | 'config' | 'nodes' | 'logs' | 'service'
+type Tab = 'home' | 'config' | 'nodes' | 'logs' | 'service' | 'settings'
 
 const activeTab = ref<Tab>('home')
 const daeStatus = ref<Record<string, any> | null>(null)
@@ -53,31 +55,31 @@ onMounted(() => {
           <Cpu class="logo-icon" :size="20" />
         </div>
         <div class="brand-text">
-          <h2>dae WebUI</h2>
-          <span class="subtext">eBPF 透明网关面板</span>
+          <h2>{{ t('brand.title') }}</h2>
+          <span class="subtext">{{ t('brand.sub') }}</span>
         </div>
       </div>
 
       <!-- Navigation Menu -->
       <nav class="nav-menu">
-        <div class="nav-section-title">概览与分析</div>
+        <div class="nav-section-title">{{ t('nav.section.overview') }}</div>
         <button
           class="nav-item"
           :class="{ active: activeTab === 'home' }"
           @click="activeTab = 'home'"
         >
           <Home class="nav-icon" :size="18" />
-          <span>首页大盘</span>
+          <span>{{ t('nav.home') }}</span>
         </button>
 
-        <div class="nav-section-title">核心管理</div>
+        <div class="nav-section-title">{{ t('nav.section.core') }}</div>
         <button
           class="nav-item"
           :class="{ active: activeTab === 'config' }"
           @click="activeTab = 'config'"
         >
           <FileText class="nav-icon" :size="18" />
-          <span>配置管理</span>
+          <span>{{ t('nav.config') }}</span>
           <span class="badge">mock</span>
         </button>
 
@@ -87,7 +89,7 @@ onMounted(() => {
           @click="activeTab = 'nodes'"
         >
           <Server class="nav-icon" :size="18" />
-          <span>节点与组 (规划中)</span>
+          <span>{{ t('nav.nodes') }}</span>
         </button>
 
         <button
@@ -96,17 +98,26 @@ onMounted(() => {
           @click="activeTab = 'logs'"
         >
           <Terminal class="nav-icon" :size="18" />
-          <span>实时日志 (规划中)</span>
+          <span>{{ t('nav.logs') }}</span>
         </button>
 
-        <div class="nav-section-title">系统状态</div>
+        <div class="nav-section-title">{{ t('nav.section.system') }}</div>
         <button
           class="nav-item"
           :class="{ active: activeTab === 'service' }"
           @click="activeTab = 'service'"
         >
           <Activity class="nav-icon" :size="18" />
-          <span>服务状态与调试</span>
+          <span>{{ t('nav.service') }}</span>
+        </button>
+
+        <button
+          class="nav-item"
+          :class="{ active: activeTab === 'settings' }"
+          @click="activeTab = 'settings'"
+        >
+          <Settings class="nav-icon" :size="18" />
+          <span>{{ t('nav.settings') }}</span>
         </button>
       </nav>
 
@@ -180,11 +191,42 @@ onMounted(() => {
           <pre>{{ JSON.stringify({ daeStatus, backendHealth }, null, 2) }}</pre>
         </div>
       </div>
+
+      <SettingsView v-else-if="activeTab === 'settings'" />
     </main>
   </div>
 </template>
 
 <style>
+/* Theme CSS Variables */
+:root, html[data-theme="dark"] {
+  --bg-main: #090d16;
+  --bg-sidebar: #0b1120;
+  --bg-card: #0f172a;
+  --bg-input: #1e293b;
+  --border-color: #1e293b;
+  --border-subtle: #334155;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --nav-hover: rgba(30, 41, 59, 0.6);
+  --nav-active: #1e293b;
+  --status-bg: rgba(15, 23, 42, 0.7);
+}
+
+html[data-theme="light"] {
+  --bg-main: #f8fafc;
+  --bg-sidebar: #ffffff;
+  --bg-card: #ffffff;
+  --bg-input: #f1f5f9;
+  --border-color: #e2e8f0;
+  --border-subtle: #cbd5e1;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --nav-hover: rgba(241, 245, 249, 0.9);
+  --nav-active: #e2e8f0;
+  --status-bg: rgba(241, 245, 249, 0.9);
+}
+
 /* Reset and global layout */
 * {
   box-sizing: border-box;
@@ -196,9 +238,10 @@ html, body {
   width: 100%;
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  background-color: #090d16;
-  color: #f1f5f9;
+  background-color: var(--bg-main);
+  color: var(--text-main);
   overflow: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 #app {
@@ -218,10 +261,11 @@ html, body {
   width: 260px;
   min-width: 260px;
   height: 100%;
-  background: #0b1120;
-  border-right: 1px solid #1e293b;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .brand {
@@ -229,7 +273,7 @@ html, body {
   align-items: center;
   gap: 12px;
   padding: 18px 20px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .brand-logo {
@@ -249,12 +293,12 @@ html, body {
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.3px;
-  color: #f8fafc;
+  color: var(--text-main);
 }
 
 .brand-text .subtext {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .nav-menu {
@@ -269,7 +313,7 @@ html, body {
 .nav-section-title {
   font-size: 11px;
   text-transform: uppercase;
-  color: #475569;
+  color: var(--text-muted);
   font-weight: 600;
   padding: 12px 10px 6px;
   letter-spacing: 0.5px;
@@ -283,7 +327,7 @@ html, body {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 7px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -292,15 +336,15 @@ html, body {
 }
 
 .nav-item:hover {
-  background: #1e293b66;
-  color: #f1f5f9;
+  background: var(--nav-hover);
+  color: var(--text-main);
 }
 
 .nav-item.active {
-  background: #1e293b;
+  background: var(--nav-active);
   color: #38bdf8;
-  border-color: #334155;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  border-color: var(--border-subtle);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .nav-icon {
@@ -310,22 +354,22 @@ html, body {
 .badge {
   margin-left: auto;
   font-size: 10px;
-  background: #0284c722;
+  background: rgba(2, 132, 199, 0.15);
   color: #38bdf8;
-  border: 1px solid #0284c744;
+  border: 1px solid rgba(2, 132, 199, 0.3);
   padding: 2px 6px;
   border-radius: 4px;
 }
 
 .sidebar-footer {
   padding: 14px;
-  border-top: 1px solid #1e293b;
-  background: #090d16;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-main);
 }
 
 .status-card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 12px;
 }

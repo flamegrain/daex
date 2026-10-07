@@ -830,6 +830,59 @@ func main() {
 		_, _ = w.Write(b)
 	})
 
+	// 7. Settings & WebUI User
+	mux.HandleFunc("GET /api/settings/user", func(w http.ResponseWriter, r *http.Request) {
+		cfgDir := filepath.Dir(o.DaeConfig)
+		u := loadWebUIUser(cfgDir)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"username":  u.Username,
+			"role":      "WebUI 管理员",
+			"updatedAt": u.UpdatedAt,
+		})
+	})
+
+	mux.HandleFunc("POST /api/settings/user", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			OldPassword string `json:"oldPassword"`
+			NewUsername string `json:"newUsername"`
+			NewPassword string `json:"newPassword"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "无效的请求参数"})
+			return
+		}
+
+		cfgDir := filepath.Dir(o.DaeConfig)
+		current := loadWebUIUser(cfgDir)
+
+		if req.OldPassword != current.Password {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "原登录密码不正确"})
+			return
+		}
+
+		if strings.TrimSpace(req.NewUsername) != "" {
+			current.Username = strings.TrimSpace(req.NewUsername)
+		}
+		if strings.TrimSpace(req.NewPassword) != "" {
+			if len(req.NewPassword) < 6 {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "新密码长度至少需要 6 位"})
+				return
+			}
+			current.Password = req.NewPassword
+		}
+
+		if err := saveWebUIUser(cfgDir, current); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "保存用户信息失败: " + err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":       true,
+			"message":  "WebUI 登录用户信息更新成功",
+			"username": current.Username,
+		})
+	})
+
 	mux.Handle("/", spaHandler())
 
 	srv := &http.Server{Addr: o.Listen, Handler: logRequests(mux), ReadHeaderTimeout: 10 * time.Second}
@@ -1143,4 +1196,44 @@ func fetchSubscriptionNodes(ctx context.Context, tag, subURL, activeConfigFile s
 	}
 
 	return nodes, nil
+}
+
+type WebUIUserConfig struct {
+	Username  string    `json:"username"`
+	Password  string    `json:"password"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+func getWebUIUserPath(cfgDir string) string {
+	dataDir := filepath.Join(cfgDir, "data")
+	_ = os.MkdirAll(dataDir, 0700)
+	return filepath.Join(dataDir, "webui_user.json")
+}
+
+func loadWebUIUser(cfgDir string) WebUIUserConfig {
+	userPath := getWebUIUserPath(cfgDir)
+	b, err := os.ReadFile(userPath)
+	if err == nil {
+		var u WebUIUserConfig
+		if json.Unmarshal(b, &u) == nil && u.Username != "" {
+			return u
+		}
+	}
+	defaultUser := WebUIUserConfig{
+		Username:  "admin",
+		Password:  "admin123",
+		UpdatedAt: time.Now(),
+	}
+	_ = saveWebUIUser(cfgDir, defaultUser)
+	return defaultUser
+}
+
+func saveWebUIUser(cfgDir string, u WebUIUserConfig) error {
+	userPath := getWebUIUserPath(cfgDir)
+	u.UpdatedAt = time.Now()
+	b, err := json.MarshalIndent(u, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(userPath, b, 0600)
 }

@@ -13,3 +13,5 @@ bin/
 *.sub.b64
 sublist
 persist.d/
+data/
+webui_user.json
