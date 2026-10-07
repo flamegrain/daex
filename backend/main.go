@@ -408,6 +408,31 @@ func main() {
 		})
 	})
 
+	mux.HandleFunc("GET /api/config/model", func(w http.ResponseWriter, r *http.Request) {
+		b, err := os.ReadFile(o.DaeConfig)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		model := parseDaeConfigToModel(string(b))
+		writeJSON(w, http.StatusOK, model)
+	})
+
+	mux.HandleFunc("POST /api/config/serialize", func(w http.ResponseWriter, r *http.Request) {
+		var model DaeConfigModel
+		if err := json.NewDecoder(r.Body).Decode(&model); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid model JSON: " + err.Error()})
+			return
+		}
+		raw := serializeModelToDae(model)
+		valid, msg := validateDaeConfig(r.Context(), o.DaeBin, raw)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"raw":     raw,
+			"valid":   valid,
+			"message": msg,
+		})
+	})
+
 	mux.HandleFunc("POST /api/config/validate", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Content string `json:"content"`
