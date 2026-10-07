@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import {
+  Home,
   FileText,
   Activity,
   Server,
@@ -11,10 +12,11 @@ import {
   Cpu
 } from 'lucide-vue-next'
 import ConfigView from './views/ConfigView.vue'
+import DashboardView from './views/DashboardView.vue'
 
-type Tab = 'config' | 'nodes' | 'logs' | 'service'
+type Tab = 'home' | 'config' | 'nodes' | 'logs' | 'service'
 
-const activeTab = ref<Tab>('config')
+const activeTab = ref<Tab>('home')
 const daeStatus = ref<Record<string, any> | null>(null)
 const backendHealth = ref<Record<string, any> | null>(null)
 const loadingStatus = ref(false)
@@ -58,6 +60,16 @@ onMounted(() => {
 
       <!-- Navigation Menu -->
       <nav class="nav-menu">
+        <div class="nav-section-title">概览与分析</div>
+        <button
+          class="nav-item"
+          :class="{ active: activeTab === 'home' }"
+          @click="activeTab = 'home'"
+        >
+          <Home class="nav-icon" :size="18" />
+          <span>首页大盘</span>
+        </button>
+
         <div class="nav-section-title">核心管理</div>
         <button
           class="nav-item"
@@ -145,7 +157,8 @@ onMounted(() => {
 
     <!-- Right Workspace Area -->
     <main class="workspace">
-      <ConfigView v-if="activeTab === 'config'" />
+      <DashboardView v-if="activeTab === 'home'" />
+      <ConfigView v-else-if="activeTab === 'config'" />
 
       <!-- Placeholder Views for Next Steps -->
       <div v-else-if="activeTab === 'nodes'" class="placeholder-view">
