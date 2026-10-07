@@ -9,15 +9,17 @@ import {
   Settings,
   CircleDot,
   RefreshCw,
-  Cpu
+  Cpu,
+  ArrowUpCircle
 } from 'lucide-vue-next'
 import ConfigView from './views/ConfigView.vue'
 import DashboardView from './views/DashboardView.vue'
 import NodesView from './views/NodesView.vue'
+import UpdateView from './views/UpdateView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { t, theme, applyTheme } from './composables/useSettings'
 
-type Tab = 'home' | 'config' | 'nodes' | 'logs' | 'service' | 'settings'
+type Tab = 'home' | 'config' | 'nodes' | 'logs' | 'service' | 'update' | 'settings'
 
 const activeTab = ref<Tab>('home')
 const daeStatus = ref<Record<string, any> | null>(null)
@@ -115,6 +117,15 @@ onMounted(() => {
 
         <button
           class="nav-item"
+          :class="{ active: activeTab === 'update' }"
+          @click="activeTab = 'update'"
+        >
+          <ArrowUpCircle class="nav-icon" :size="18" />
+          <span>{{ t('nav.update') }}</span>
+        </button>
+
+        <button
+          class="nav-item"
           :class="{ active: activeTab === 'settings' }"
           @click="activeTab = 'settings'"
         >
@@ -188,6 +199,7 @@ onMounted(() => {
         </div>
       </div>
 
+      <UpdateView v-else-if="activeTab === 'update'" />
       <SettingsView v-else-if="activeTab === 'settings'" />
     </main>
   </div>
@@ -522,6 +534,7 @@ html, body {
 [data-theme="light"] .home-dashboard,
 [data-theme="light"] .config-view,
 [data-theme="light"] .nodes-view,
+[data-theme="light"] .update-view,
 [data-theme="light"] .settings-view,
 [data-theme="light"] .workspace-area,
 [data-theme="light"] .form-mode-container,
@@ -532,6 +545,7 @@ html, body {
 
 [data-theme="light"] .settings-header,
 [data-theme="light"] .view-header,
+[data-theme="light"] .update-header,
 [data-theme="light"] .toolbar,
 [data-theme="light"] .form-subnav,
 [data-theme="light"] .status-bar {
@@ -551,6 +565,7 @@ html, body {
 [data-theme="light"] .group-card,
 [data-theme="light"] .sub-card,
 [data-theme="light"] .simulator-modal,
+[data-theme="light"] .update-card,
 [data-theme="light"] .form-grid,
 [data-theme="light"] .table-wrapper {
   background-color: #ffffff !important;

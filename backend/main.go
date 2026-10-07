@@ -462,6 +462,34 @@ func main() {
 		writeJSON(w, http.StatusOK, traceResult)
 	})
 
+	// 2.4 System update checks and actions
+	mux.HandleFunc("GET /api/update/check", func(w http.ResponseWriter, r *http.Request) {
+		res, err := checkSystemUpdate(r.Context(), o.DaeBin)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
+
+	mux.HandleFunc("POST /api/update/dae", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			DownloadURL string `json:"downloadUrl"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		res := executeDaeUpdate(r.Context(), o.DaeBin, req.DownloadURL)
+		writeJSON(w, http.StatusOK, res)
+	})
+
+	mux.HandleFunc("POST /api/update/rules", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Types []string `json:"types"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		res := executeRulesUpdate(r.Context(), req.Types)
+		writeJSON(w, http.StatusOK, res)
+	})
+
 	// 3. Config files list and profiles management
 	mux.HandleFunc("GET /api/configs", func(w http.ResponseWriter, r *http.Request) {
 		profiles, err := listConfigProfiles(o.DaeConfig)
