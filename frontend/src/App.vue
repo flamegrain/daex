@@ -14,7 +14,7 @@ import {
 import ConfigView from './views/ConfigView.vue'
 import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
-import { t } from './composables/useSettings'
+import { t, theme, applyTheme } from './composables/useSettings'
 
 type Tab = 'home' | 'config' | 'nodes' | 'logs' | 'service' | 'settings'
 
@@ -40,13 +40,14 @@ async function refreshDaeStatus() {
 }
 
 onMounted(() => {
+  applyTheme(theme.value)
   refreshDaeStatus()
   setInterval(refreshDaeStatus, 15000)
 })
 </script>
 
 <template>
-  <div class="app-layout">
+  <div class="app-layout" :data-theme="theme">
     <!-- Left Sidebar -->
     <aside class="sidebar">
       <!-- App Brand -->
@@ -468,9 +469,10 @@ html, body {
 .workspace {
   flex: 1;
   height: 100%;
-  background: #090d16;
+  background: var(--bg-main);
   overflow: hidden;
   position: relative;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .placeholder-view {
@@ -485,7 +487,7 @@ html, body {
 }
 
 .placeholder-view h3 {
-  color: #cbd5e1;
+  color: var(--text-main);
   margin: 16px 0 8px;
   font-size: 18px;
 }
@@ -498,15 +500,15 @@ html, body {
 
 .placeholder-view code {
   color: #38bdf8;
-  background: #1e293b;
+  background: var(--bg-input);
   padding: 2px 6px;
   border-radius: 4px;
 }
 
 .raw-status-box {
   margin-top: 20px;
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 16px;
   text-align: left;
@@ -515,6 +517,188 @@ html, body {
   max-height: 300px;
   overflow: auto;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-muted);
+}
+
+/* ========================================================
+   GLOBAL LIGHT THEME OVERRIDES FOR ALL WORKSPACE VIEWS
+   ======================================================== */
+[data-theme="light"] .workspace,
+[data-theme="light"] .home-dashboard,
+[data-theme="light"] .config-view,
+[data-theme="light"] .settings-view {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .settings-header,
+[data-theme="light"] .toolbar {
+  background-color: #ffffff !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .settings-card,
+[data-theme="light"] .chart-card,
+[data-theme="light"] .metric-card,
+[data-theme="light"] .table-card,
+[data-theme="light"] .item-card,
+[data-theme="light"] .modal-card,
+[data-theme="light"] .status-card {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05) !important;
+}
+
+[data-theme="light"] .card-title,
+[data-theme="light"] .modal-header,
+[data-theme="light"] .section-title-bar {
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .card-title h3,
+[data-theme="light"] .modal-header h3,
+[data-theme="light"] .section-title-bar h3,
+[data-theme="light"] .dash-header .title,
+[data-theme="light"] .settings-header h2,
+[data-theme="light"] .metric-val,
+[data-theme="light"] .bold {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .card-info .row .lbl,
+[data-theme="light"] .meta-label,
+[data-theme="light"] .setting-label,
+[data-theme="light"] .form-field label,
+[data-theme="light"] .dash-header .subtitle,
+[data-theme="light"] .subtitle,
+[data-theme="light"] .section-title-bar p {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .card-info .row .val,
+[data-theme="light"] .meta-value,
+[data-theme="light"] .metric-title {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .text-input,
+[data-theme="light"] .select-input,
+[data-theme="light"] input:not([type="checkbox"]),
+[data-theme="light"] select {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .theme-btn {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #64748b !important;
+}
+[data-theme="light"] .theme-btn:hover {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+[data-theme="light"] .theme-btn.active {
+  background-color: #eff6ff !important;
+  border-color: #3b82f6 !important;
+  color: #2563eb !important;
+}
+
+[data-theme="light"] .user-meta-bar,
+[data-theme="light"] .about-item,
+[data-theme="light"] .raw-status-box {
+  background-color: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .notice-box {
+  background-color: #eff6ff !important;
+  border-color: #bfdbfe !important;
+}
+[data-theme="light"] .notice-text {
+  color: #1e40af !important;
+}
+
+[data-theme="light"] .mode-switcher,
+[data-theme="light"] .form-subnav {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .mode-btn.active,
+[data-theme="light"] .subnav-item.active {
+  background-color: #ffffff !important;
+  color: #0284c7 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+
+[data-theme="light"] .profile-select-wrapper {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+[data-theme="light"] .profile-select {
+  color: #0284c7 !important;
+}
+[data-theme="light"] .profile-select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .btn-secondary,
+[data-theme="light"] .btn-icon-subtle,
+[data-theme="light"] .refresh-pill {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+[data-theme="light"] .btn-secondary:hover,
+[data-theme="light"] .btn-icon-subtle:hover,
+[data-theme="light"] .refresh-pill:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .rule-table-wrap,
+[data-theme="light"] .nodes-table-wrap,
+[data-theme="light"] .sub-nodes-table-wrap,
+[data-theme="light"] .table-container {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] table th {
+  background-color: #f8fafc !important;
+  color: #64748b !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] table td {
+  border-bottom-color: #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+[data-theme="light"] table tr:hover {
+  background-color: #f8fafc !important;
+}
+
+[data-theme="light"] .empty-state-box {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+[data-theme="light"] .empty-text {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .editor-host,
+[data-theme="light"] .cm-editor {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+[data-theme="light"] .cm-gutters {
+  background-color: #f8fafc !important;
+  border-right-color: #e2e8f0 !important;
+  color: #94a3b8 !important;
 }
 </style>
