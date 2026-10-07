@@ -24,8 +24,33 @@ import {
   Check,
   Copy,
   ListFilter,
-  CheckSquare
+  CheckSquare,
+  ArrowUp,
+  ArrowDown,
+  AlertTriangle,
+  ShieldAlert,
+  BookOpen,
+  Lightbulb,
+  HelpCircle,
+  Wand2,
+  Sparkles,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Info
 } from 'lucide-vue-next'
+import {
+  analyzeRoutingConflicts,
+  type RoutingHealthReport,
+  type RoutingConflict,
+  type ConflictSeverity
+} from '../utils/routingAnalyzer'
+import {
+  ROUTING_PRESETS,
+  ROUTING_SYNTAX_GUIDE,
+  type RoutingPreset,
+  type SyntaxDocSection
+} from '../utils/routingPresets'
 import { EditorState } from '@codemirror/state'
 import { EditorView, lineNumbers, keymap } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -157,6 +182,21 @@ const editingGroup = ref<{
 
 const showRouteModal = ref(false)
 const routeModalMode = ref<'add' | 'edit'>('add')
+const routeModalTab = ref<'form' | 'guide'>('form')
+const routeInputMode = ref<'preset' | 'builder' | 'custom'>('preset')
+const selectedPresetId = ref<string>('lan-private')
+
+interface ConditionBuilderItem {
+  not: boolean
+  type: 'domain' | 'dip' | 'dport' | 'sip' | 'sport' | 'l4proto' | 'ipversion' | 'pname' | 'mac'
+  modifier: string
+  value: string
+}
+
+const builderItems = ref<ConditionBuilderItem[]>([
+  { not: false, type: 'domain', modifier: 'geosite', value: 'cn' }
+])
+
 const editingRoute = ref<{
   condition: string
   target: string
@@ -167,6 +207,15 @@ const editingRoute = ref<{
   target: 'proxy',
   customTarget: '',
   index: -1
+})
+
+// Conflict diagnosis
+const showConflictDetails = ref(true)
+const highlightedRuleIndex = ref<number | null>(null)
+
+const routingHealthReport = computed<RoutingHealthReport>(() => {
+  const groupNames = configModel.value.groups.map(g => g.name)
+  return analyzeRoutingConflicts(configModel.value.routingRules, groupNames)
 })
 
 const showSubModal = ref(false)
@@ -722,20 +771,96 @@ function deleteGroup(name: string) {
   syncModelToCode()
 }
 
-// Routing CRUD
+// Routing CRUD, Presets & Builder Helpers
+function addBuilderItem() {
+  builderItems.value.push({ not: false, type: 'domain', modifier: 'geosite', value: '' })
+  updateConditionFromBuilder()
+}
+
+function removeBuilderItem(idx: number) {
+  if (builderItems.value.length > 1) {
+    builderItems.value.splice(idx, 1)
+    updateConditionFromBuilder()
+  }
+}
+
+function updateConditionFromBuilder() {
+  const parts: string[] = []
+  for (const item of builderItems.value) {
+    const val = item.value.trim()
+    if (!val) continue
+    let sub = ''
+    if (item.type === 'domain') {
+      if (item.modifier && item.modifier !== 'none') {
+        sub = `domain(${item.modifier}:${val})`
+      } else {
+        sub = `domain(${val})`
+      }
+    } else if (item.type === 'dip') {
+      if (item.modifier === 'geoip') {
+        sub = `dip(geoip:${val})`
+      } else {
+        sub = `dip(${val})`
+      }
+    } else if (item.type === 'dport') {
+      sub = `dport(${val})`
+    } else if (item.type === 'sip') {
+      sub = `sip(${val})`
+    } else if (item.type === 'sport') {
+      sub = `sport(${val})`
+    } else if (item.type === 'l4proto') {
+      sub = `l4proto(${val})`
+    } else if (item.type === 'ipversion') {
+      sub = `ipversion(${val})`
+    } else if (item.type === 'pname') {
+      sub = `pname(${val})`
+    } else if (item.type === 'mac') {
+      sub = `mac('${val}')`
+    }
+    if (sub) {
+      parts.push((item.not ? '!' : '') + sub)
+    }
+  }
+  editingRoute.value.condition = parts.join(' && ')
+}
+
+function applyPreset(presetId: string) {
+  selectedPresetId.value = presetId
+  const p = ROUTING_PRESETS.find(x => x.id === presetId)
+  if (!p) return
+  editingRoute.value.condition = p.condition
+  if (!editingRoute.value.target || editingRoute.value.target === 'proxy' || editingRoute.value.target === 'direct') {
+    editingRoute.value.target = p.recommendedTarget
+  }
+}
+
+function applyExampleToRoute(ex: { code: string; explain: string }, recTarget = 'direct') {
+  editingRoute.value.condition = ex.code
+  editingRoute.value.target = recTarget
+  routeInputMode.value = 'custom'
+  routeModalTab.value = 'form'
+}
+
 function openAddRoute() {
   routeModalMode.value = 'add'
+  routeModalTab.value = 'form'
+  routeInputMode.value = 'preset'
+  selectedPresetId.value = 'lan-private'
   editingRoute.value = {
-    condition: 'domain(geosite:custom)',
-    target: 'proxy',
+    condition: 'dip(geoip:private)',
+    target: 'direct',
     customTarget: '',
     index: -1
   }
+  builderItems.value = [
+    { not: false, type: 'domain', modifier: 'geosite', value: 'cn' }
+  ]
   showRouteModal.value = true
 }
 
 function openEditRoute(r: ConfigRouteRule, idx: number) {
   routeModalMode.value = 'edit'
+  routeModalTab.value = 'form'
   const knownBuiltins = ['direct', 'must_direct', 'block', 'proxy']
   const groupNames = configModel.value.groups.map(g => g.name)
   let targetVal = r.target
@@ -744,6 +869,14 @@ function openEditRoute(r: ConfigRouteRule, idx: number) {
   if (!knownBuiltins.includes(r.target) && !groupNames.includes(r.target)) {
     targetVal = '__custom__'
     customVal = r.target
+  }
+
+  const matchedPreset = ROUTING_PRESETS.find(p => p.condition === r.condition)
+  if (matchedPreset) {
+    routeInputMode.value = 'preset'
+    selectedPresetId.value = matchedPreset.id
+  } else {
+    routeInputMode.value = 'custom'
   }
 
   editingRoute.value = {
@@ -756,6 +889,10 @@ function openEditRoute(r: ConfigRouteRule, idx: number) {
 }
 
 function saveRouteModal() {
+  if (routeInputMode.value === 'builder') {
+    updateConditionFromBuilder()
+  }
+
   let finalTarget = editingRoute.value.target
   if (finalTarget === '__custom__') {
     finalTarget = editingRoute.value.customTarget.trim()
@@ -764,8 +901,10 @@ function saveRouteModal() {
     alert('分流匹配条件与目标出口动作不能为空')
     return
   }
+
+  const trimmedCond = editingRoute.value.condition.trim()
   const item: ConfigRouteRule = {
-    condition: editingRoute.value.condition.trim(),
+    condition: trimmedCond,
     target: finalTarget
   }
   if (routeModalMode.value === 'add') {
@@ -784,6 +923,68 @@ function deleteRoute(idx: number) {
   configModel.value.routingRules.splice(idx, 1)
   isDirty.value = true
   syncModelToCode()
+}
+
+function moveRouteUp(idx: number) {
+  if (idx <= 0) return
+  const rules = configModel.value.routingRules
+  const temp = rules[idx]
+  rules[idx] = rules[idx - 1]
+  rules[idx - 1] = temp
+  isDirty.value = true
+  syncModelToCode()
+}
+
+function moveRouteDown(idx: number) {
+  const rules = configModel.value.routingRules
+  if (idx >= rules.length - 1) return
+  const temp = rules[idx]
+  rules[idx] = rules[idx + 1]
+  rules[idx + 1] = temp
+  isDirty.value = true
+  syncModelToCode()
+}
+
+function duplicateRoute(idx: number) {
+  const rule = configModel.value.routingRules[idx]
+  configModel.value.routingRules.splice(idx + 1, 0, { ...rule })
+  isDirty.value = true
+  syncModelToCode()
+}
+
+function highlightRule(idx: number) {
+  highlightedRuleIndex.value = idx
+  setTimeout(() => {
+    const el = document.getElementById(`route-row-${idx}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, 50)
+  setTimeout(() => {
+    if (highlightedRuleIndex.value === idx) {
+      highlightedRuleIndex.value = null
+    }
+  }, 3500)
+}
+
+function fixMissingPrivateBypass() {
+  configModel.value.routingRules.unshift({
+    condition: 'dip(geoip:private)',
+    target: 'direct'
+  })
+  isDirty.value = true
+  syncModelToCode()
+}
+
+function fixFallbackOrder() {
+  const rules = configModel.value.routingRules
+  const fbIdx = rules.findIndex(r => r.condition.trim() === 'fallback')
+  if (fbIdx >= 0 && fbIdx < rules.length - 1) {
+    const [fbRule] = rules.splice(fbIdx, 1)
+    rules.push(fbRule)
+    isDirty.value = true
+    syncModelToCode()
+  }
 }
 
 // Subscriptions
@@ -1218,12 +1419,127 @@ onMounted(() => {
         <div v-else-if="activeSection === 'routing'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>分流与路由规则</h3>
-              <p>匹配流量特征（geosite, geoip, dip, dport, pname 等）并指定动作 (direct, block, 或策略组)</p>
+              <div class="title-with-badge">
+                <h3>分流与路由规则</h3>
+                <span
+                  v-if="routingHealthReport.hasErrors"
+                  class="health-badge danger"
+                  title="检测到规则冲突或死规则错误"
+                >
+                  <ShieldAlert :size="12" /> 存在 {{ routingHealthReport.conflicts.filter(c => c.severity === 'error').length }} 项严重错误
+                </span>
+                <span
+                  v-else-if="routingHealthReport.hasWarnings"
+                  class="health-badge warning"
+                  title="检测到规则遮蔽或冗余警告"
+                >
+                  <AlertTriangle :size="12" /> 存在 {{ routingHealthReport.conflicts.filter(c => c.severity === 'warning').length }} 项优化警告
+                </span>
+                <span
+                  v-else-if="configModel.routingRules.length > 0"
+                  class="health-badge success"
+                  title="规则语法与匹配顺序完全健康"
+                >
+                  <ShieldCheck :size="12" /> 规则健康良好
+                </span>
+              </div>
+              <p>匹配流量特征（geosite, geoip, dip, dport, pname 等）并按自上而下「首条命中即终止」原则导向出口</p>
             </div>
-            <button class="btn btn-primary" @click="openAddRoute">
-              <Plus :size="14" /> 添加路由规则
-            </button>
+            <div class="title-actions">
+              <button class="btn btn-primary" @click="openAddRoute">
+                <Plus :size="14" /> 添加路由规则
+              </button>
+            </div>
+          </div>
+
+          <!-- Conflict & Health Diagnostic Panel -->
+          <div v-if="configModel.routingRules.length > 0" class="conflict-panel-wrap">
+            <!-- Case 1: Healthy banner -->
+            <div v-if="!routingHealthReport.hasErrors && !routingHealthReport.hasWarnings && routingHealthReport.conflicts.length === 0" class="health-summary-banner success">
+              <ShieldCheck class="banner-icon" :size="18" />
+              <div class="banner-text">
+                <span class="banner-title">分流规则逻辑健康</span>
+                <span class="banner-sub">共 {{ configModel.routingRules.length }} 条规则，未检测到阴影规则 (Shadowed)、重复规则或 Fallback 顺序错误。所有规则将按顺序执行。</span>
+              </div>
+            </div>
+
+            <!-- Case 2: Conflicts or optimization suggestions -->
+            <div v-else class="conflict-card" :class="{ 'has-error': routingHealthReport.hasErrors }">
+              <div class="conflict-card-header" @click="showConflictDetails = !showConflictDetails">
+                <div class="header-left">
+                  <ShieldAlert v-if="routingHealthReport.hasErrors" class="status-icon danger" :size="20" />
+                  <AlertTriangle v-else class="status-icon warning" :size="20" />
+                  <div>
+                    <h4 class="conflict-card-title">
+                      规则冲突与优化诊断
+                      <span class="conflict-count-pill">共 {{ routingHealthReport.conflicts.length }} 项提示</span>
+                    </h4>
+                    <p class="conflict-card-subtitle">
+                      dae 按照从上到下的顺序进行路由判定（First-Match-Wins）。以下规则可能存在遮蔽死代码或潜在网络访问问题：
+                    </p>
+                  </div>
+                </div>
+                <button class="btn-icon-subtle toggle-collapse-btn" :title="showConflictDetails ? '收起详情' : '展开详情'">
+                  <ChevronUp v-if="showConflictDetails" :size="16" />
+                  <ChevronDown v-else :size="16" />
+                </button>
+              </div>
+
+              <div v-if="showConflictDetails" class="conflict-list">
+                <div
+                  v-for="conflict in routingHealthReport.conflicts"
+                  :key="conflict.id"
+                  class="conflict-item"
+                  :class="conflict.severity"
+                >
+                  <div class="conflict-item-header">
+                    <span class="sev-tag" :class="conflict.severity">
+                      {{ conflict.severity === 'error' ? '错误 / 逻辑冲突' : (conflict.severity === 'warning' ? '警告 / 阴影规则' : '最佳实践建议') }}
+                    </span>
+                    <span class="conflict-name">{{ conflict.title }}</span>
+                    <div v-if="conflict.ruleIndices.length > 0" class="involved-rules">
+                      <span class="lbl-involved">涉及规则:</span>
+                      <button
+                        v-for="idx in conflict.ruleIndices"
+                        :key="idx"
+                        class="rule-link-chip"
+                        @click="highlightRule(idx)"
+                        title="点击在列表中定位高亮该条规则"
+                      >
+                        #{{ idx + 1 }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="conflict-desc">{{ conflict.message }}</div>
+                  <div class="conflict-suggestion">
+                    <Lightbulb class="sugg-icon" :size="14" />
+                    <div class="sugg-content">
+                      <span class="sugg-label">优化修改建议:</span>
+                      <span>{{ conflict.suggestion }}</span>
+                    </div>
+                    <!-- Quick action buttons -->
+                    <div class="quick-fix-actions">
+                      <button
+                        v-if="conflict.id === 'missing-private-bypass'"
+                        class="btn btn-sm btn-quick-fix"
+                        @click="fixMissingPrivateBypass"
+                        title="在规则列表顶部自动插入 dip(geoip:private) -> direct"
+                      >
+                        <Wand2 :size="12" /> 一键在顶部插入私网直连
+                      </button>
+                      <button
+                        v-if="conflict.id === 'fallback-not-last'"
+                        class="btn btn-sm btn-quick-fix"
+                        @click="fixFallbackOrder"
+                        title="自动将 fallback 规则移至列表最后一行"
+                      >
+                        <Wand2 :size="12" /> 一键将 Fallback 移至末尾
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-if="configModel.routingRules.length === 0" class="empty-state-box">
@@ -1239,25 +1555,92 @@ onMounted(() => {
             <table class="rule-table">
               <thead>
                 <tr>
-                  <th style="width: 50px">#</th>
-                  <th>匹配条件</th>
-                  <th style="width: 140px">动作出口</th>
-                  <th style="width: 90px; text-align: right">操作</th>
+                  <th style="width: 60px">#</th>
+                  <th>匹配条件 (Condition)</th>
+                  <th style="width: 150px">动作出口 (Target)</th>
+                  <th style="width: 110px">状态健康</th>
+                  <th style="width: 160px; text-align: right">操作与排序</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(rule, idx) in configModel.routingRules" :key="idx">
-                  <td class="idx-cell">{{ idx + 1 }}</td>
+                <tr
+                  v-for="(rule, idx) in configModel.routingRules"
+                  :key="idx"
+                  :id="`route-row-${idx}`"
+                  :class="{
+                    'row-highlighted': highlightedRuleIndex === idx,
+                    'row-error': routingHealthReport.ruleStatusMap[idx]?.severity === 'error',
+                    'row-warning': routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'
+                  }"
+                >
+                  <td class="idx-cell">
+                    <span class="idx-num">{{ idx + 1 }}</span>
+                  </td>
                   <td class="mono cond-cell">
-                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">兜底路由</span>
-                    <span v-else>{{ rule.condition }}</span>
+                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">兜底路由 (fallback)</span>
+                    <span v-else class="rule-condition-text">{{ rule.condition }}</span>
                   </td>
                   <td>
                     <span class="target-tag" :class="rule.target">{{ rule.target }}</span>
                   </td>
-                  <td style="text-align: right">
-                    <button class="btn-icon" @click="openEditRoute(rule, idx)"><Edit2 :size="12" /></button>
-                    <button class="btn-icon delete" @click="deleteRoute(idx)"><Trash2 :size="12" /></button>
+                  <td>
+                    <span
+                      v-if="routingHealthReport.ruleStatusMap[idx]?.severity === 'error'"
+                      class="rule-health-tag danger"
+                      :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
+                    >
+                      <ShieldAlert :size="12" /> 严重冲突
+                    </span>
+                    <span
+                      v-else-if="routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'"
+                      class="rule-health-tag warning"
+                      :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
+                    >
+                      <AlertTriangle :size="12" /> 规则遮蔽
+                    </span>
+                    <span v-else class="rule-health-tag ok" title="匹配逻辑正常">
+                      <Check :size="12" /> 正常
+                    </span>
+                  </td>
+                  <td style="text-align: right" class="row-action-cell">
+                    <!-- Move up / down -->
+                    <button
+                      class="btn-icon"
+                      :disabled="idx === 0"
+                      @click="moveRouteUp(idx)"
+                      title="上移此规则 (提升匹配优先级)"
+                    >
+                      <ArrowUp :size="12" />
+                    </button>
+                    <button
+                      class="btn-icon"
+                      :disabled="idx === configModel.routingRules.length - 1"
+                      @click="moveRouteDown(idx)"
+                      title="下移此规则 (降低匹配优先级)"
+                    >
+                      <ArrowDown :size="12" />
+                    </button>
+                    <button
+                      class="btn-icon"
+                      @click="duplicateRoute(idx)"
+                      title="复制此规则"
+                    >
+                      <Copy :size="12" />
+                    </button>
+                    <button
+                      class="btn-icon"
+                      @click="openEditRoute(rule, idx)"
+                      title="编辑此规则"
+                    >
+                      <Edit2 :size="12" />
+                    </button>
+                    <button
+                      class="btn-icon delete"
+                      @click="deleteRoute(idx)"
+                      title="删除此规则"
+                    >
+                      <Trash2 :size="12" />
+                    </button>
                   </td>
                 </tr>
               </tbody>
@@ -1465,43 +1848,356 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Route Rule Modal -->
+    <!-- Route Rule Modal (Upgraded with Presets, Builder & Syntax Guide) -->
     <div v-if="showRouteModal" class="modal-backdrop" @click.self="showRouteModal = false">
-      <div class="modal-card">
+      <div class="modal-card modal-lg">
         <div class="modal-header">
-          <h3>{{ routeModalMode === 'add' ? '新增路由分流规则' : '编辑分流规则' }}</h3>
+          <div class="modal-title-with-tabs">
+            <h3>{{ routeModalMode === 'add' ? '新增路由分流规则' : '编辑分流规则' }}</h3>
+            <div class="modal-subtabs">
+              <button
+                class="subtab-btn"
+                :class="{ active: routeModalTab === 'form' }"
+                @click="routeModalTab = 'form'"
+              >
+                <Sliders :size="13" />
+                <span>规则参数配置</span>
+              </button>
+              <button
+                class="subtab-btn"
+                :class="{ active: routeModalTab === 'guide' }"
+                @click="routeModalTab = 'guide'"
+              >
+                <BookOpen :size="13" />
+                <span>dae 语法指南与示例</span>
+              </button>
+            </div>
+          </div>
           <button class="close-btn" @click="showRouteModal = false">&times;</button>
         </div>
-        <div class="modal-body form-modal">
-          <div class="field">
-            <label>匹配条件 (Condition)</label>
-            <input v-model="editingRoute.condition" placeholder="domain(geosite:google) 或 dip(geoip:cn)" />
+
+        <!-- Tab 1: Form Configuration -->
+        <div v-if="routeModalTab === 'form'" class="modal-body form-modal">
+          <!-- Input Mode Switcher -->
+          <div class="mode-pill-bar">
+            <span class="mode-pill-label">匹配条件模式:</span>
+            <div class="pill-group">
+              <button
+                type="button"
+                class="pill-btn"
+                :class="{ active: routeInputMode === 'preset' }"
+                @click="routeInputMode = 'preset'"
+              >
+                <Sparkles :size="12" />
+                <span>⚡ 常用预设模板</span>
+              </button>
+              <button
+                type="button"
+                class="pill-btn"
+                :class="{ active: routeInputMode === 'builder' }"
+                @click="routeInputMode = 'builder'"
+              >
+                <Wand2 :size="12" />
+                <span>🛠️ 结构化构造器</span>
+              </button>
+              <button
+                type="button"
+                class="pill-btn"
+                :class="{ active: routeInputMode === 'custom' }"
+                @click="routeInputMode = 'custom'"
+              >
+                <Code :size="12" />
+                <span>✏️ 手写专家代码</span>
+              </button>
+            </div>
           </div>
+
+          <!-- Mode A: Presets Dropdown -->
+          <div v-if="routeInputMode === 'preset'" class="preset-section">
+            <div class="field">
+              <label>选择常用分流规则模板 (Condition 下拉选择)</label>
+              <select
+                :value="selectedPresetId"
+                @change="applyPreset(($event.target as HTMLSelectElement).value)"
+                class="preset-select"
+              >
+                <optgroup label="基础常用规则">
+                  <option
+                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'common')"
+                    :key="p.id"
+                    :value="p.id"
+                  >
+                    {{ p.name }} → {{ p.condition }}
+                  </option>
+                </optgroup>
+                <optgroup label="安全与 DNS">
+                  <option
+                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'security')"
+                    :key="p.id"
+                    :value="p.id"
+                  >
+                    {{ p.name }} → {{ p.condition }}
+                  </option>
+                </optgroup>
+                <optgroup label="境外服务与流媒体">
+                  <option
+                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'media')"
+                    :key="p.id"
+                    :value="p.id"
+                  >
+                    {{ p.name }} → {{ p.condition }}
+                  </option>
+                </optgroup>
+                <optgroup label="开发者与 AI 工具">
+                  <option
+                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'dev')"
+                    :key="p.id"
+                    :value="p.id"
+                  >
+                    {{ p.name }} → {{ p.condition }}
+                  </option>
+                </optgroup>
+                <optgroup label="高级与协议端口">
+                  <option
+                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'advanced')"
+                    :key="p.id"
+                    :value="p.id"
+                  >
+                    {{ p.name }} → {{ p.condition }}
+                  </option>
+                </optgroup>
+              </select>
+            </div>
+
+            <!-- Preset explanation box -->
+            <div v-if="selectedPresetId" class="preset-card-info">
+              <div class="preset-desc-line">
+                <Info :size="14" class="info-icon text-accent" />
+                <span>{{ ROUTING_PRESETS.find(x => x.id === selectedPresetId)?.description }}</span>
+              </div>
+              <div v-if="ROUTING_PRESETS.find(x => x.id === selectedPresetId)?.tip" class="preset-tip-line">
+                <Lightbulb :size="14" class="tip-icon text-warning" />
+                <span>{{ ROUTING_PRESETS.find(x => x.id === selectedPresetId)?.tip }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mode B: Visual Condition Builder -->
+          <div v-else-if="routeInputMode === 'builder'" class="builder-section">
+            <div class="builder-items-list">
+              <div
+                v-for="(item, bIdx) in builderItems"
+                :key="bIdx"
+                class="builder-row"
+              >
+                <!-- Negate check -->
+                <label class="builder-not-check" title="取反当前条件 (!)">
+                  <input
+                    type="checkbox"
+                    v-model="item.not"
+                    @change="updateConditionFromBuilder"
+                  />
+                  <span>! 非</span>
+                </label>
+
+                <!-- Type select -->
+                <select
+                  v-model="item.type"
+                  class="builder-type-select"
+                  @change="updateConditionFromBuilder"
+                >
+                  <option value="domain">domain 域名匹配</option>
+                  <option value="dip">dip 目标 IP 匹配</option>
+                  <option value="dport">dport 目标端口</option>
+                  <option value="sip">sip 客户端源 IP</option>
+                  <option value="sport">sport 源端口</option>
+                  <option value="l4proto">l4proto 传输协议</option>
+                  <option value="ipversion">ipversion IP 版本</option>
+                  <option value="pname">pname 进程名称</option>
+                  <option value="mac">mac 客户端物理地址</option>
+                </select>
+
+                <!-- Domain modifiers -->
+                <select
+                  v-if="item.type === 'domain'"
+                  v-model="item.modifier"
+                  class="builder-mod-select"
+                  @change="updateConditionFromBuilder"
+                >
+                  <option value="geosite">geosite 规则库 (推荐)</option>
+                  <option value="suffix">域名后缀 (suffix)</option>
+                  <option value="keyword">包含关键字 (keyword)</option>
+                  <option value="full">精准全域名 (full)</option>
+                  <option value="regex">正则表达式 (regex)</option>
+                  <option value="none">默认泛域名</option>
+                </select>
+
+                <!-- Dip modifiers -->
+                <select
+                  v-else-if="item.type === 'dip'"
+                  v-model="item.modifier"
+                  class="builder-mod-select"
+                  @change="updateConditionFromBuilder"
+                >
+                  <option value="geoip">geoip 规则库 (如 cn, private)</option>
+                  <option value="none">单 IP 或 CIDR 网段</option>
+                </select>
+
+                <!-- Parameter input -->
+                <div class="builder-val-box">
+                  <input
+                    type="text"
+                    v-model="item.value"
+                    @input="updateConditionFromBuilder"
+                    :placeholder="
+                      item.type === 'domain' ? (item.modifier === 'geosite' ? '如: cn 或 google,youtube' : '如: google.com') :
+                      item.type === 'dip' ? (item.modifier === 'geoip' ? '如: private 或 cn' : '如: 192.168.1.0/24') :
+                      item.type === 'dport' ? '如: 80, 443 或 53' :
+                      item.type === 'l4proto' ? 'tcp 或 udp' :
+                      item.type === 'ipversion' ? '4 或 6' :
+                      item.type === 'pname' ? '如: curl 或 chrome' :
+                      item.type === 'mac' ? '如: 00:11:22:33:44:55' : '输入参数值'
+                    "
+                    class="builder-val-input"
+                  />
+                  <!-- Quick chips for fast completion -->
+                  <div class="quick-chips">
+                    <template v-if="item.type === 'domain' && item.modifier === 'geosite'">
+                      <span class="chip" @click="item.value = 'cn'; updateConditionFromBuilder()">cn</span>
+                      <span class="chip" @click="item.value = 'google'; updateConditionFromBuilder()">google</span>
+                      <span class="chip" @click="item.value = 'category-ads-all'; updateConditionFromBuilder()">ads-all</span>
+                      <span class="chip" @click="item.value = 'github'; updateConditionFromBuilder()">github</span>
+                    </template>
+                    <template v-else-if="item.type === 'dip' && item.modifier === 'geoip'">
+                      <span class="chip" @click="item.value = 'private'; updateConditionFromBuilder()">private</span>
+                      <span class="chip" @click="item.value = 'cn'; updateConditionFromBuilder()">cn</span>
+                      <span class="chip" @click="item.value = 'us'; updateConditionFromBuilder()">us</span>
+                    </template>
+                    <template v-else-if="item.type === 'dport'">
+                      <span class="chip" @click="item.value = '80, 443'; updateConditionFromBuilder()">80, 443</span>
+                      <span class="chip" @click="item.value = '53'; updateConditionFromBuilder()">53 (DNS)</span>
+                      <span class="chip" @click="item.value = '22'; updateConditionFromBuilder()">22 (SSH)</span>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Delete row button -->
+                <button
+                  type="button"
+                  class="btn-icon delete"
+                  :disabled="builderItems.length <= 1"
+                  @click="removeBuilderItem(bIdx)"
+                  title="删除此子条件"
+                >
+                  <Trash2 :size="13" />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm btn-add-cond"
+                @click="addBuilderItem"
+              >
+                <Plus :size="12" /> 添加组合条件 (使用 && 连接)
+              </button>
+            </div>
+          </div>
+
+          <!-- Mode C: Custom Raw Code -->
+          <div v-else class="custom-section">
+            <div class="field">
+              <label>手写匹配条件表达式 (dae Condition 语法)</label>
+              <input
+                v-model="editingRoute.condition"
+                placeholder="例如: domain(geosite:google) 或 dip(geoip:cn) 或 fallback"
+                class="mono-input"
+              />
+              <span class="help-text">支持使用 && 逻辑与、! 逻辑非，以及 domain, dip, dport, l4proto, pname, sip, mac, fallback 等</span>
+            </div>
+          </div>
+
+          <!-- Live dae syntax preview -->
+          <div class="syntax-preview-box">
+            <span class="preview-label">实时生成的 dae 规则语句:</span>
+            <code class="preview-code">
+              {{ editingRoute.condition.trim() === 'fallback' ? `fallback: ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '<目标出口>') : editingRoute.target}` : `${editingRoute.condition || '<匹配条件>'} -> ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '<目标出口>') : editingRoute.target}` }}
+            </code>
+          </div>
+
+          <!-- Target Selection -->
           <div class="field">
             <label>目标动作 (Target / 出口分流)</label>
-            <select v-model="editingRoute.target">
-              <optgroup label="内置动作 (Built-in Actions)">
-                <option value="direct">direct (直接放行 / 直连)</option>
-                <option value="must_direct">must_direct (强制直连 / 绕过代理)</option>
-                <option value="block">block (阻断连接 / 丢弃)</option>
+            <select v-model="editingRoute.target" class="target-select">
+              <optgroup label="内置直连与阻断动作 (Built-in Actions)">
+                <option value="direct">direct (直接放行 / 默认直连)</option>
+                <option value="must_direct">must_direct (强制直连 / 避开本地 DNS 劫持)</option>
+                <option value="block">block (阻断连接 / 丢弃数据包)</option>
               </optgroup>
-              <optgroup label="代理策略组 (Proxy Groups)">
+              <optgroup label="出站策略组 (Proxy Groups)">
                 <option v-for="g in configModel.groups" :key="g.name" :value="g.name">
-                  {{ g.name }} (出站组: {{ g.policy }})
+                  {{ g.name }} (出站组策略: {{ g.policy }})
                 </option>
               </optgroup>
-              <optgroup label="高级 / 自定义">
-                <option value="__custom__">自定义动作 / 组名...</option>
+              <optgroup label="高级与自定义">
+                <option value="__custom__">自定义策略组或动作名...</option>
               </optgroup>
             </select>
           </div>
+
           <div v-if="editingRoute.target === '__custom__'" class="field">
             <label>输入自定义目标出口名称</label>
-            <input v-model="editingRoute.customTarget" placeholder="输入合法的动作或组名" />
+            <input v-model="editingRoute.customTarget" placeholder="输入合法的组名或动作" />
           </div>
+
           <div class="modal-actions">
             <button class="btn btn-secondary" @click="showRouteModal = false">取消</button>
-            <button class="btn btn-primary" @click="saveRouteModal">确定保存</button>
+            <button class="btn btn-primary" @click="saveRouteModal">确定保存分流规则</button>
+          </div>
+        </div>
+
+        <!-- Tab 2: Syntax Guide & Examples -->
+        <div v-else class="modal-body guide-modal">
+          <div class="guide-banner">
+            <div class="banner-title"><BookOpen :size="15" /> dae 官方分流规则语法与核心机制说明</div>
+            <p>
+              dae 遵循自上而下的<strong>「首条命中立即终止」(First-Match-Wins)</strong> 原则。匹配条件由一个或多个 Matcher 组成，可用 <code>&amp;&amp;</code> 连接，并支持在条件前使用 <code>!</code> 取反。
+            </p>
+          </div>
+
+          <div class="syntax-docs-grid">
+            <div
+              v-for="(sec, sIdx) in ROUTING_SYNTAX_GUIDE"
+              :key="sIdx"
+              class="syntax-card"
+            >
+              <div class="syntax-card-head">
+                <h4>{{ sec.title }}</h4>
+                <code class="syntax-tag">{{ sec.syntax }}</code>
+              </div>
+              <p class="syntax-summary">{{ sec.summary }}</p>
+              <div class="syntax-examples-wrap">
+                <span class="ex-lbl">实用范例：</span>
+                <div
+                  v-for="(ex, eIdx) in sec.examples"
+                  :key="eIdx"
+                  class="syntax-example-row"
+                >
+                  <code class="ex-code">{{ ex.code }}</code>
+                  <span class="ex-explain">{{ ex.explain }}</span>
+                  <button
+                    class="btn-text-xs"
+                    @click="applyExampleToRoute(ex)"
+                    title="将此示例表达式填入当前编辑规则"
+                  >
+                    <Copy :size="10" /> 填入表单
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button class="btn btn-primary" @click="routeModalTab = 'form'">返回规则参数配置</button>
           </div>
         </div>
       </div>
@@ -2630,5 +3326,792 @@ onMounted(() => {
   gap: 4px;
   font-size: 11px;
   color: var(--text-muted, #94a3b8);
+}
+
+/* =========================================================
+   Routing Rules Upgrade: Conflict Diagnostic Panel & Builder
+   ========================================================= */
+
+.modal-card.modal-lg {
+  width: 820px;
+  max-width: 95vw;
+}
+
+.modal-title-with-tabs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.modal-title-with-tabs h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-subtabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-input, #090d16);
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #1e293b);
+}
+
+.subtab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.subtab-btn:hover {
+  color: var(--text-main, #f8fafc);
+}
+
+.subtab-btn.active {
+  background: var(--bg-card, #1e293b);
+  color: #0284c7;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.title-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.health-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.health-badge.success {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.health-badge.warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.health-badge.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* Conflict & Health Diagnostic Panel */
+.conflict-panel-wrap {
+  margin-bottom: 16px;
+}
+
+.health-summary-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.health-summary-banner.success .banner-icon {
+  color: #10b981;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.banner-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #10b981;
+}
+
+.banner-sub {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.4;
+}
+
+.conflict-card {
+  border-radius: 8px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.conflict-card.has-error {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.conflict-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-input, #090d16);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+}
+
+.conflict-card-header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.conflict-card-header .status-icon.warning {
+  color: #f59e0b;
+}
+
+.conflict-card-header .status-icon.danger {
+  color: #ef4444;
+}
+
+.conflict-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conflict-count-pill {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border-radius: 10px;
+}
+
+.conflict-card.has-error .conflict-count-pill {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.conflict-card-subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.toggle-collapse-btn {
+  color: var(--text-muted, #94a3b8);
+}
+
+.conflict-list {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.conflict-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--bg-input, #090d16);
+  border-left: 3px solid #0284c7;
+}
+
+.conflict-item.error {
+  border-left-color: #ef4444;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.conflict-item.warning {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.conflict-item.info {
+  border-left-color: #0284c7;
+  background: rgba(2, 132, 199, 0.04);
+}
+
+.conflict-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.sev-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.sev-tag.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.sev-tag.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.sev-tag.info {
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+}
+
+.conflict-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+}
+
+.involved-rules {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lbl-involved {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.rule-link-chip {
+  padding: 1px 5px;
+  background: var(--bg-card, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0284c7;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.rule-link-chip:hover {
+  background: #0284c7;
+  color: #fff;
+  border-color: #0284c7;
+}
+
+.conflict-desc {
+  font-size: 12px;
+  color: var(--text-main, #e2e8f0);
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+
+.conflict-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--bg-card, #0f172a);
+  border: 1px dashed var(--border-color, #334155);
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  flex-wrap: wrap;
+}
+
+.sugg-icon {
+  color: #f59e0b;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.sugg-content {
+  flex: 1;
+}
+
+.sugg-label {
+  font-weight: 600;
+  color: #f59e0b;
+  margin-right: 4px;
+}
+
+.quick-fix-actions {
+  margin-top: 4px;
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-quick-fix {
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+  border: 1px solid rgba(2, 132, 199, 0.3);
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.btn-quick-fix:hover {
+  background: #0284c7;
+  color: #fff;
+}
+
+/* Table row highlight & status badges */
+.rule-table tr.row-highlighted {
+  background: rgba(2, 132, 199, 0.18) !important;
+  box-shadow: inset 3px 0 0 #0284c7;
+  animation: pulseHighlight 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes pulseHighlight {
+  from {
+    background: rgba(2, 132, 199, 0.12);
+  }
+  to {
+    background: rgba(2, 132, 199, 0.28);
+  }
+}
+
+.rule-table tr.row-error {
+  border-left: 2px solid #ef4444;
+}
+
+.rule-table tr.row-warning {
+  border-left: 2px solid #f59e0b;
+}
+
+.rule-condition-text {
+  color: var(--text-main, #f8fafc);
+  font-size: 12px;
+}
+
+.rule-health-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.rule-health-tag.ok {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.rule-health-tag.warning {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.rule-health-tag.danger {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.row-action-cell {
+  white-space: nowrap;
+}
+
+/* Modal Input Mode Pills */
+.mode-pill-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+}
+
+.mode-pill-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+}
+
+.pill-group {
+  display: flex;
+  gap: 6px;
+  background: var(--bg-input, #090d16);
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #1e293b);
+}
+
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pill-btn:hover {
+  color: var(--text-main, #f8fafc);
+}
+
+.pill-btn.active {
+  background: var(--bg-card, #1e293b);
+  color: #0284c7;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Presets Section */
+.preset-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.preset-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+  color: var(--text-main, #f8fafc);
+  font-size: 13px;
+}
+
+.preset-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.preset-desc-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-main, #e2e8f0);
+}
+
+.preset-tip-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #f59e0b;
+  font-weight: 500;
+}
+
+/* Builder Section */
+.builder-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.builder-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.builder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-input, #090d16);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #1e293b);
+  flex-wrap: wrap;
+}
+
+.builder-not-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ef4444;
+  cursor: pointer;
+}
+
+.builder-type-select {
+  padding: 6px 10px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 4px;
+  color: var(--text-main, #f8fafc);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.builder-mod-select {
+  padding: 6px 10px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 4px;
+  color: #0284c7;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.builder-val-box {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.builder-val-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 4px;
+  color: var(--text-main, #f8fafc);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.quick-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.quick-chips .chip {
+  padding: 1px 5px;
+  background: var(--bg-card, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quick-chips .chip:hover {
+  background: #0284c7;
+  color: #fff;
+  border-color: #0284c7;
+}
+
+.btn-add-cond {
+  align-self: flex-start;
+  gap: 6px;
+  font-size: 11px;
+}
+
+/* Custom Raw Input */
+.custom-section {
+  margin-bottom: 14px;
+}
+
+.mono-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+
+/* Syntax Live Preview */
+.syntax-preview-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--bg-input, #090d16);
+  border-left: 3px solid #0284c7;
+  border-radius: 4px;
+  margin-bottom: 14px;
+}
+
+.preview-label {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  font-weight: 500;
+}
+
+.preview-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0284c7;
+  word-break: break-all;
+}
+
+/* Guide Tab */
+.guide-modal {
+  max-height: 65vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px;
+}
+
+.guide-banner {
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: rgba(2, 132, 199, 0.08);
+  border: 1px solid rgba(2, 132, 199, 0.2);
+}
+
+.guide-banner .banner-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0284c7;
+  margin-bottom: 4px;
+}
+
+.guide-banner p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-main, #cbd5e1);
+  line-height: 1.5;
+}
+
+.syntax-docs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.syntax-card {
+  padding: 12px;
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.syntax-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.syntax-card-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+}
+
+.syntax-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-card, #1e293b);
+  color: #0284c7;
+}
+
+.syntax-summary {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.4;
+}
+
+.syntax-examples-wrap {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ex-lbl {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+  text-transform: uppercase;
+}
+
+.syntax-example-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  background: var(--bg-card, #0f172a);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.ex-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #10b981;
+  font-weight: 500;
+}
+
+.ex-explain {
+  flex: 1;
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-text-xs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: rgba(2, 132, 199, 0.12);
+  border: 1px solid rgba(2, 132, 199, 0.25);
+  border-radius: 3px;
+  color: #0284c7;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-text-xs:hover {
+  background: #0284c7;
+  color: #fff;
 }
 </style>
