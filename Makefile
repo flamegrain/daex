@@ -22,7 +22,7 @@ RSYNC_EXCLUDES := --exclude .git/ --exclude node_modules/ --exclude backend/tmp/
                   --exclude backend/internal/webui/dist/ --exclude '*.log' --exclude .DS_Store
 
 .PHONY: sync watch dev-setup dev-restart dev-stop logs status deploy ssh pull-lock \
-        vm-deps vm-dev-install vm-build vm-deploy
+        install uninstall package vm-deps vm-dev-install vm-build vm-deploy
 
 # ---------------- local ----------------
 sync:
@@ -57,6 +57,16 @@ deploy: sync
 
 ssh:
 	ssh -t $(VM) 'cd $(REMOTE) && exec $$SHELL -l'
+
+# ---------------- local install / package ----------------
+install:
+	@sudo ./install.sh install
+
+uninstall:
+	@sudo ./install.sh uninstall
+
+package:
+	@./scripts/build-release.sh
 
 # ---------------- on VM ----------------
 vm-deps:
