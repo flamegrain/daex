@@ -240,7 +240,7 @@ function applyPreset(domain: string, ip: string, desc: string) {
 }
 
 function formatTime(ts?: number) {
-  if (!ts) return '未测速'
+  if (!ts) return t('nodes.not_tested')
   const d = new Date(ts * 1000)
   return d.toLocaleTimeString([], { hour12: false })
 }
@@ -289,7 +289,7 @@ onMounted(() => {
           class="action-btn icon-only"
           :disabled="loading"
           @click="fetchOverview"
-          title="刷新最新配置与状态"
+          :title="t('common.refresh')"
         >
           <RefreshCw :size="14" :class="{ spin: loading }" />
         </button>
@@ -440,7 +440,7 @@ onMounted(() => {
                 :class="{ 'row-active': node.active }"
               >
                 <td>
-                  <span v-if="node.active" class="active-pill" title="当前节点正在转发流量">
+                  <span v-if="node.active" class="active-pill" :title="t('nodes.active_traffic_title')">
                     <CheckCircle2 :size="12" /> {{ t('nodes.table.active') }}
                   </span>
                   <span v-else class="standby-pill">{{ t('nodes.table.standby') }}</span>
@@ -631,37 +631,37 @@ onMounted(() => {
             <span class="preset-label">{{ t('nodes.sim.presets') }}:</span>
             <button
               class="preset-btn"
-              @click="applyPreset('www.google.com', '142.250.190.46', '谷歌搜索')"
+              @click="applyPreset('www.google.com', '142.250.190.46', t('nodes.sim_preset_google'))"
             >
               Google
             </button>
             <button
               class="preset-btn"
-              @click="applyPreset('github.com', '140.82.112.4', 'GitHub 代码库')"
+              @click="applyPreset('github.com', '140.82.112.4', t('nodes.sim_preset_github'))"
             >
               GitHub
             </button>
             <button
               class="preset-btn"
-              @click="applyPreset('netflix.com', '198.51.100.80', '流媒体')"
+              @click="applyPreset('netflix.com', '198.51.100.80', t('nodes.sim_preset_netflix'))"
             >
               Netflix
             </button>
             <button
               class="preset-btn"
-              @click="applyPreset('chatgpt.com', '104.18.2.161', 'AI 助手')"
+              @click="applyPreset('chatgpt.com', '104.18.2.161', t('nodes.sim_preset_chatgpt'))"
             >
               OpenAI
             </button>
             <button
               class="preset-btn"
-              @click="applyPreset('router.local', '192.168.1.1', '内网私有')"
+              @click="applyPreset('router.local', '192.168.1.1', t('nodes.sim_preset_lan'))"
             >
               192.168.1.1
             </button>
             <button
               class="preset-btn"
-              @click="applyPreset('baidu.com', '110.242.68.66', '国内直连')"
+              @click="applyPreset('baidu.com', '110.242.68.66', t('nodes.sim_preset_baidu'))"
             >
               Baidu (.cn)
             </button>
@@ -757,7 +757,7 @@ onMounted(() => {
                   :key="idx"
                   class="step-line"
                   :class="{
-                    hit: step.includes('命中！') || step.includes('出口路由选路'),
+                    hit: step.includes('命中！') || step.includes('出口路由选路') || step.includes('Hit!') || step.includes('Route selection'),
                     header: step.includes('=== 🚀')
                   }"
                 >

@@ -120,7 +120,7 @@ async function triggerDaeUpdate() {
   if (updatingDae.value) return
   updatingDae.value = true
   executionLogs.value = [
-    `[${new Date().toLocaleTimeString()}] 🚀 准备升级 dae 核心主程序 (${overview.value.dae.latestVersion})...`
+    t('update.log_prepare_dae', { time: new Date().toLocaleTimeString(), version: overview.value.dae.latestVersion })
   ]
 
   try {
@@ -139,7 +139,7 @@ async function triggerDaeUpdate() {
       await fetchUpdateCheck()
     }
   } catch (e: any) {
-    executionLogs.value.push(`❌ 请求失败: ${e?.message || e}`)
+    executionLogs.value.push(t('update.log_req_failed', { error: e?.message || e }))
   } finally {
     updatingDae.value = false
   }
@@ -149,7 +149,7 @@ async function triggerRulesUpdate(types: string[] = []) {
   if (updatingRules.value) return
   updatingRules.value = true
   executionLogs.value = [
-    `[${new Date().toLocaleTimeString()}] 🚀 准备更新规则库: ${types.length ? types.join(', ') : 'geoip, geosite'}...`
+    t('update.log_prepare_rules', { time: new Date().toLocaleTimeString(), types: types.length ? types.join(', ') : 'geoip, geosite' })
   ]
 
   try {
@@ -166,7 +166,7 @@ async function triggerRulesUpdate(types: string[] = []) {
       await fetchUpdateCheck()
     }
   } catch (e: any) {
-    executionLogs.value.push(`❌ 更新失败: ${e?.message || e}`)
+    executionLogs.value.push(t('update.log_update_failed', { error: e?.message || e }))
   } finally {
     updatingRules.value = false
     updatingSingleRule.value = null
@@ -196,7 +196,7 @@ async function fetchTemplateInfo() {
 
 async function triggerTemplatesUpdate() {
   updatingTemplates.value = true
-  executionLogs.value = [`[${new Date().toLocaleTimeString()}] 🚀 启动分流规则预设模板库更新任务...`]
+  executionLogs.value = [t('update.log_prepare_tmpl', { time: new Date().toLocaleTimeString() })]
   try {
     const res = await fetch('/api/routing/templates/update', { method: 'POST' })
     const data = await res.json()
@@ -207,7 +207,7 @@ async function triggerTemplatesUpdate() {
       await fetchTemplateInfo()
     }
   } catch (err: any) {
-    executionLogs.value.push(`❌ 更新模板任务请求失败: ${err.message}`)
+    executionLogs.value.push(t('update.log_tmpl_failed', { error: err.message }))
   } finally {
     updatingTemplates.value = false
   }
@@ -399,8 +399,8 @@ onMounted(() => {
           <div class="card-title">
             <Sparkles :size="18" class="card-icon tmpl-icon" />
             <div>
-              <h3>分流规则预设模板库</h3>
-              <p class="card-sub">用于分流规则可视化配置的官方常用场景模板与最佳实践规范集合</p>
+              <h3>{{ t('update.tmpl_title') }}</h3>
+              <p class="card-sub">{{ t('update.tmpl_sub') }}</p>
             </div>
           </div>
 
@@ -408,28 +408,28 @@ onMounted(() => {
             class="action-btn secondary"
             :disabled="updatingTemplates"
             @click="triggerTemplatesUpdate"
-            title="从服务端同步最新分流预设模板"
+            :title="t('update.tmpl_btn_update')"
           >
             <DownloadCloud :size="14" :class="{ spin: updatingTemplates }" />
-            <span>{{ updatingTemplates ? '正在更新模板库...' : '一键更新模板库' }}</span>
+            <span>{{ updatingTemplates ? t('update.tmpl_updating') : t('update.tmpl_btn_update') }}</span>
           </button>
         </div>
 
         <div class="meta-grid">
           <div class="meta-item">
-            <span class="meta-lbl">当前版本</span>
+            <span class="meta-lbl">{{ t('update.tmpl_curr_ver') }}</span>
             <span class="meta-val mono bold">v{{ templateMeta.version }}</span>
           </div>
           <div class="meta-item">
-            <span class="meta-lbl">包含模板</span>
-            <span class="meta-val">{{ templateMeta.count }} 个精选场景</span>
+            <span class="meta-lbl">{{ t('update.tmpl_count') }}</span>
+            <span class="meta-val">{{ t('update.tmpl_count_val', { count: templateMeta.count }) }}</span>
           </div>
           <div class="meta-item">
-            <span class="meta-lbl">最近更新</span>
+            <span class="meta-lbl">{{ t('update.tmpl_mod_time') }}</span>
             <span class="meta-val">{{ templateMeta.updatedAt }}</span>
           </div>
           <div class="meta-item">
-            <span class="meta-lbl">存储文件</span>
+            <span class="meta-lbl">{{ t('update.tmpl_file') }}</span>
             <span class="meta-val mono">routing_templates.json</span>
           </div>
         </div>

@@ -16,7 +16,7 @@ import {
   PlayCircle
 } from 'lucide-vue-next'
 import * as echarts from 'echarts'
-import { theme } from '../composables/useSettings'
+import { theme, lang, t } from '../composables/useSettings'
 
 interface NodeItem {
   key: string
@@ -214,6 +214,13 @@ async function testAllTargets() {
   }
 }
 
+function getTargetName(item: ConnectivityItem) {
+  const key = `dashboard.target_${item.id}`
+  const val = t(key)
+  if (val !== key) return val
+  return item.name.replace('访问检测', '').replace('Access Test', '').trim()
+}
+
 function initCharts() {
   if (speedChartEl.value) {
     speedChart = echarts.init(speedChartEl.value)
@@ -241,6 +248,9 @@ function updateCharts(data: any) {
       parseFloat((h.uploadBps / 1024 / 1024).toFixed(2))
     )
 
+    const downLabel = `${t('dashboard.chart_download')} (MB/s)`
+    const upLabel = `${t('dashboard.chart_upload')} (MB/s)`
+
     const speedOption: echarts.EChartsOption = {
       backgroundColor: 'transparent',
       tooltip: {
@@ -260,7 +270,7 @@ function updateCharts(data: any) {
         }
       },
       legend: {
-        data: ['下行速率 (MB/s)', '上行速率 (MB/s)'],
+        data: [downLabel, upLabel],
         textStyle: { color: isLight ? '#475569' : '#94a3b8', fontSize: 12 },
         top: 0,
         right: 10
@@ -287,7 +297,7 @@ function updateCharts(data: any) {
       },
       series: [
         {
-          name: '下行速率 (MB/s)',
+          name: downLabel,
           type: 'line',
           smooth: true,
           showSymbol: false,
@@ -301,7 +311,7 @@ function updateCharts(data: any) {
           }
         },
         {
-          name: '上行速率 (MB/s)',
+          name: upLabel,
           type: 'line',
           smooth: true,
           showSymbol: false,
@@ -320,7 +330,7 @@ function updateCharts(data: any) {
   }
 }
 
-watch(theme, () => {
+watch([theme, lang], () => {
   if (dashboardData.value) {
     updateCharts(dashboardData.value)
   }
@@ -347,12 +357,12 @@ onUnmounted(() => {
     <!-- Header Summary -->
     <header class="dash-header">
       <div>
-        <h2 class="title">网关运行首页</h2>
-        <p class="subtitle">基于内核态 eBPF 的轻量路由核心与流量监控面板</p>
+        <h2 class="title">{{ t('dashboard.title') }}</h2>
+        <p class="subtitle">{{ t('dashboard.subtitle') }}</p>
       </div>
       <button class="refresh-pill" @click="fetchDashboard">
         <RefreshCw :size="13" />
-        <span>刷新仪表盘</span>
+        <span>{{ t('dashboard.refresh') }}</span>
       </button>
     </header>
 
@@ -361,7 +371,7 @@ onUnmounted(() => {
       <!-- 1. Download Speed -->
       <div class="metric-card">
         <div class="metric-top">
-          <span class="m-label">当前下载速率</span>
+          <span class="m-label">{{ t('dashboard.down_rate') }}</span>
           <div class="icon-circle down">
             <ArrowDownRight :size="16" />
           </div>
@@ -370,14 +380,14 @@ onUnmounted(() => {
           {{ formatBps(dashboardData?.current?.downloadBps) }}
         </div>
         <div class="metric-sub">
-          总接收: {{ formatBytes(dashboardData?.current?.totalRx) }}
+          {{ t('dashboard.total_rx') }}: {{ formatBytes(dashboardData?.current?.totalRx) }}
         </div>
       </div>
 
       <!-- 2. Upload Speed -->
       <div class="metric-card">
         <div class="metric-top">
-          <span class="m-label">当前上传速率</span>
+          <span class="m-label">{{ t('dashboard.up_rate') }}</span>
           <div class="icon-circle up">
             <ArrowUpRight :size="16" />
           </div>
@@ -386,20 +396,20 @@ onUnmounted(() => {
           {{ formatBps(dashboardData?.current?.uploadBps) }}
         </div>
         <div class="metric-sub">
-          总发送: {{ formatBytes(dashboardData?.current?.totalTx) }}
+          {{ t('dashboard.total_tx') }}: {{ formatBytes(dashboardData?.current?.totalTx) }}
         </div>
       </div>
 
       <!-- 3. Active Nodes & Gateway -->
       <div class="metric-card">
         <div class="metric-top">
-          <span class="m-label">核心工作状态</span>
+          <span class="m-label">{{ t('dashboard.core_status') }}</span>
           <div class="icon-circle status">
             <Activity :size="16" />
           </div>
         </div>
         <div class="metric-value active-text">
-          {{ dashboardData?.dae?.ActiveState === 'active' ? '正常运行中' : '未运行' }}
+          {{ dashboardData?.dae?.ActiveState === 'active' ? t('dashboard.status_active') : t('dashboard.status_inactive') }}
         </div>
         <div class="metric-sub">
           <span>PID: {{ dashboardData?.dae?.MainPID || '-' }}</span>
@@ -411,16 +421,16 @@ onUnmounted(() => {
       <!-- 4. Node Counts -->
       <div class="metric-card">
         <div class="metric-top">
-          <span class="m-label">就绪代理节点</span>
+          <span class="m-label">{{ t('dashboard.ready_nodes') }}</span>
           <div class="icon-circle node">
             <Server :size="16" />
           </div>
         </div>
         <div class="metric-value">
-          {{ dashboardData?.nodes?.length || 0 }} <span class="unit">个</span>
+          {{ dashboardData?.nodes?.length || 0 }} <span class="unit">{{ t('dashboard.unit_nodes') }}</span>
         </div>
         <div class="metric-sub">
-          生效中: <b>2</b> 个分流出口
+          {{ t('dashboard.active_outbounds', { count: 2 }) }}
         </div>
       </div>
     </section>
@@ -432,9 +442,9 @@ onUnmounted(() => {
         <div class="card-head">
           <div class="head-title">
             <Activity class="h-icon" :size="16" />
-            <span>实时数据传输速率</span>
+            <span>{{ t('dashboard.speed_chart_title') }}</span>
           </div>
-          <span class="tag live">● 实时推流</span>
+          <span class="tag live">{{ t('dashboard.speed_live') }}</span>
         </div>
         <div class="chart-container" ref="speedChartEl"></div>
       </div>
@@ -444,16 +454,16 @@ onUnmounted(() => {
         <div class="card-head">
           <div class="head-title">
             <Gauge class="h-icon" :size="16" />
-            <span>连通性快速检测</span>
+            <span>{{ t('dashboard.conn_title') }}</span>
           </div>
           <button
             class="btn-test-all"
             :disabled="testingAll"
             @click="testAllTargets"
-            title="一键测试所有常用服务连通性与分流状态"
+            :title="t('dashboard.conn_test_all_tip')"
           >
             <Zap :size="12" :class="{ spin: testingAll }" />
-            <span>{{ testingAll ? '检测中...' : '一键检测' }}</span>
+            <span>{{ testingAll ? t('dashboard.conn_testing') : t('dashboard.conn_test_all') }}</span>
           </button>
         </div>
 
@@ -498,16 +508,22 @@ onUnmounted(() => {
             <!-- Target Detail Info -->
             <div class="target-meta">
               <div class="target-title-row">
-                <span class="target-name">{{ item.name.replace('访问检测', '') }}</span>
+                <span class="target-name">{{ getTargetName(item) }}</span>
                 <span
                   class="route-pill"
                   :class="{
-                    direct: item.expectedOut.includes('直连'),
-                    proxy: item.expectedOut.includes('代理'),
-                    ai: item.expectedOut.includes('解锁')
+                    direct: item.expectedOut.includes('直连') || item.expectedOut.toLowerCase().includes('direct'),
+                    proxy: item.expectedOut.includes('代理') || item.expectedOut.toLowerCase().includes('proxy'),
+                    ai: item.expectedOut.includes('解锁') || item.expectedOut.toLowerCase().includes('unlock')
                   }"
                 >
-                  {{ item.expectedOut.replace(' (direct)', '').replace(' (proxy)', '') }}
+                  {{
+                    (item.expectedOut.includes('直连') || item.expectedOut.toLowerCase().includes('direct'))
+                      ? t('dashboard.conn_direct')
+                      : (item.expectedOut.includes('代理') || item.expectedOut.toLowerCase().includes('proxy'))
+                      ? t('dashboard.conn_proxy')
+                      : t('dashboard.conn_unlock')
+                  }}
                 </span>
               </div>
               <div class="target-sub-row">
@@ -535,7 +551,7 @@ onUnmounted(() => {
                 class="btn-test-icon"
                 :disabled="testingTargets[item.id] || testingAll"
                 @click="testTarget(item.id)"
-                :title="`重新测试 ${item.name}`"
+                :title="t('dashboard.conn_retest', { name: getTargetName(item) })"
               >
                 <RefreshCw
                   :size="11"
@@ -553,31 +569,31 @@ onUnmounted(() => {
       <div class="section-head">
         <div class="head-title">
           <Layers class="h-icon" :size="16" />
-          <span>生效与可用节点详细列表</span>
+          <span>{{ t('dashboard.nodes_table_title') }}</span>
         </div>
-        <span class="badge-mock">沙箱假数据安全展示</span>
+        <span class="badge-mock">{{ t('dashboard.mock_badge') }}</span>
       </div>
 
       <div class="table-wrapper">
         <table class="nodes-table">
           <thead>
             <tr>
-              <th style="width: 90px">状态</th>
-              <th style="width: 110px">国家/地区</th>
-              <th style="width: 25%">节点名称</th>
-              <th style="width: 80px">协议</th>
-              <th style="width: 30%">目标地址</th>
-              <th style="width: 70px">端口</th>
-              <th style="width: 90px">测速延迟</th>
+              <th style="width: 90px">{{ t('dashboard.col_status') }}</th>
+              <th style="width: 110px">{{ t('dashboard.col_region') }}</th>
+              <th style="width: 25%">{{ t('dashboard.col_name') }}</th>
+              <th style="width: 80px">{{ t('dashboard.col_proto') }}</th>
+              <th style="width: 30%">{{ t('dashboard.col_addr') }}</th>
+              <th style="width: 70px">{{ t('dashboard.col_port') }}</th>
+              <th style="width: 90px">{{ t('dashboard.col_latency') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="node in dashboardData?.nodes" :key="node.key" :class="{ 'row-active': node.active }">
               <td>
                 <span v-if="node.active" class="active-pill">
-                  <CheckCircle2 :size="12" /> 生效中
+                  <CheckCircle2 :size="12" /> {{ t('dashboard.active_pill') }}
                 </span>
-                <span v-else class="standby-pill">就绪</span>
+                <span v-else class="standby-pill">{{ t('dashboard.standby_pill') }}</span>
               </td>
               <td class="country-cell">
                 <span class="flag">{{ node.flag }}</span>

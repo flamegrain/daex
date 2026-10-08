@@ -149,12 +149,12 @@ async function createLogBackup() {
     if (res.ok && data.ok) {
       backupLabel.value = ''
       await fetchBackups()
-      alert(`日志快照备份成功！\n文件: ${data.name}`)
+      alert(t('logs.backup_success', { name: data.name }))
     } else {
-      alert('备份失败: ' + (data.error || ''))
+      alert(t('logs.backup_failed', { error: data.error || '' }))
     }
   } catch (err: any) {
-    alert('备份请求异常: ' + err.message)
+    alert(t('logs.backup_req_err', { error: err.message }))
   } finally {
     creatingBackup.value = false
   }
@@ -165,14 +165,14 @@ function downloadBackupItem(name: string) {
 }
 
 async function deleteBackupItem(name: string) {
-  if (!confirm(`确认删除日志快照 [${name}]？`)) return
+  if (!confirm(t('logs.confirm_delete_backup', { name }))) return
   try {
     const res = await fetch(`/api/logs/backups/${encodeURIComponent(name)}`, { method: 'DELETE' })
     if (res.ok) {
       await fetchBackups()
     }
   } catch (e: any) {
-    alert('删除备份失败: ' + e.message)
+    alert(t('logs.delete_backup_failed', { error: e.message }))
   }
 }
 
@@ -222,15 +222,15 @@ onUnmounted(() => {
         <div class="page-title-badge">
           <Terminal class="title-icon" :size="20" />
           <div>
-            <h2>日志管理与实时调试</h2>
-            <span class="subtext">支持系统分流日志实时捕获、级别检索、快照备份与日志文件下载导出</span>
+            <h2>{{ t('logs.title') }}</h2>
+            <span class="subtext">{{ t('logs.subtitle') }}</span>
           </div>
         </div>
 
         <div class="source-tag">
           <span class="source-dot"></span>
-          <span>数据来源: {{ logSource }}</span>
-          <span class="time-hint">(更新于 {{ lastUpdateTime }})</span>
+          <span>{{ t('logs.source', { source: logSource }) }}</span>
+          <span class="time-hint">{{ t('logs.updated_at', { time: lastUpdateTime }) }}</span>
         </div>
       </div>
 
@@ -240,10 +240,10 @@ onUnmounted(() => {
           class="btn btn-secondary btn-sm"
           :class="{ active: autoRefresh }"
           @click="autoRefresh = !autoRefresh"
-          title="切换是否自动拉取最新日志"
+          :title="autoRefresh ? t('logs.auto_pull_on') : t('logs.auto_pull_off')"
         >
           <component :is="autoRefresh ? Pause : Play" :size="13" />
-          <span>{{ autoRefresh ? '自动拉取 (开)' : '自动拉取 (已暂停)' }}</span>
+          <span>{{ autoRefresh ? t('logs.auto_pull_on') : t('logs.auto_pull_off') }}</span>
         </button>
 
         <!-- Auto Scroll Toggle -->
@@ -251,10 +251,10 @@ onUnmounted(() => {
           class="btn btn-secondary btn-sm"
           :class="{ active: autoScroll }"
           @click="autoScroll = !autoScroll"
-          title="新日志出现时自动平滑滚动到最新行"
+          :title="autoScroll ? t('logs.auto_scroll_on') : t('logs.auto_scroll_off')"
         >
           <ArrowDownCircle :size="13" />
-          <span>{{ autoScroll ? '滚动跟随 (开)' : '滚动跟随 (关)' }}</span>
+          <span>{{ autoScroll ? t('logs.auto_scroll_on') : t('logs.auto_scroll_off') }}</span>
         </button>
 
         <!-- Manual Refresh -->
@@ -262,10 +262,10 @@ onUnmounted(() => {
           class="btn btn-secondary btn-sm"
           :disabled="loading"
           @click="fetchLogs(true)"
-          title="立即手动拉取最新日志"
+          :title="t('logs.btn_refresh')"
         >
           <RefreshCw :size="13" :class="{ spin: loading }" />
-          <span>刷新</span>
+          <span>{{ t('logs.btn_refresh') }}</span>
         </button>
 
         <div class="divider"></div>
@@ -274,20 +274,20 @@ onUnmounted(() => {
         <button
           class="btn btn-secondary btn-sm"
           @click="downloadCurrentLogs"
-          title="下载全部原始日志为 .log 文件"
+          :title="t('logs.btn_download')"
         >
           <Download :size="13" />
-          <span>日志下载</span>
+          <span>{{ t('logs.btn_download') }}</span>
         </button>
 
         <!-- Backup Logs Button -->
         <button
           class="btn btn-primary btn-sm"
           @click="openBackupManager"
-          title="创建日志快照备份或管理历史快照"
+          :title="t('logs.btn_backup')"
         >
           <Archive :size="13" />
-          <span>日志备份</span>
+          <span>{{ t('logs.btn_backup') }}</span>
         </button>
       </div>
     </header>
@@ -300,14 +300,14 @@ onUnmounted(() => {
         <input
           type="text"
           v-model="searchQuery"
-          placeholder="搜索日志关键字、IP地址、域名、规则或错误信息..."
+          :placeholder="t('logs.search_ph')"
           class="search-input"
         />
         <button
           v-if="searchQuery"
           class="btn-clear"
           @click="searchQuery = ''"
-          title="清除搜索"
+          :title="t('common.cancel')"
         >
           &times;
         </button>
@@ -315,64 +315,64 @@ onUnmounted(() => {
 
       <!-- Level Pills Filter -->
       <div class="filter-pill-group">
-        <span class="pill-label">级别筛选:</span>
+        <span class="pill-label">{{ t('logs.level_filter') }}</span>
         <button
           class="level-pill"
           :class="{ active: selectedLevel === 'ALL' }"
           @click="selectedLevel = 'ALL'"
         >
-          全部 ({{ levelCounts.ALL }})
+          {{ t('logs.level_all') }} ({{ levelCounts.ALL }})
         </button>
         <button
           class="level-pill error"
           :class="{ active: selectedLevel === 'ERROR' }"
           @click="selectedLevel = 'ERROR'"
         >
-          <ShieldAlert :size="12" /> 错误 ({{ levelCounts.ERROR }})
+          <ShieldAlert :size="12" /> {{ t('logs.level_error') }} ({{ levelCounts.ERROR }})
         </button>
         <button
           class="level-pill warn"
           :class="{ active: selectedLevel === 'WARN' }"
           @click="selectedLevel = 'WARN'"
         >
-          <AlertTriangle :size="12" /> 警告 ({{ levelCounts.WARN }})
+          <AlertTriangle :size="12" /> {{ t('logs.level_warn') }} ({{ levelCounts.WARN }})
         </button>
         <button
           class="level-pill info"
           :class="{ active: selectedLevel === 'INFO' }"
           @click="selectedLevel = 'INFO'"
         >
-          <Info :size="12" /> 信息 ({{ levelCounts.INFO }})
+          <Info :size="12" /> {{ t('logs.level_info') }} ({{ levelCounts.INFO }})
         </button>
         <button
           class="level-pill debug"
           :class="{ active: selectedLevel === 'DEBUG' }"
           @click="selectedLevel = 'DEBUG'"
         >
-          <Bug :size="12" /> 调试 ({{ levelCounts.DEBUG }})
+          <Bug :size="12" /> {{ t('logs.level_debug') }} ({{ levelCounts.DEBUG }})
         </button>
       </div>
 
       <!-- Module Tag Filter -->
       <div class="filter-pill-group tag-group">
-        <span class="pill-label">模块分类:</span>
+        <span class="pill-label">{{ t('logs.module_filter') }}</span>
         <select v-model="selectedTag" class="tag-select">
-          <option value="all">全部模块</option>
-          <option value="routing">分流规则</option>
-          <option value="dns">域名解析</option>
-          <option value="ebpf">内核探针</option>
-          <option value="proxy">代理策略</option>
-          <option value="system">系统核心</option>
+          <option value="all">{{ t('logs.module_all') }}</option>
+          <option value="routing">routing</option>
+          <option value="dns">dns</option>
+          <option value="ebpf">ebpf</option>
+          <option value="proxy">proxy</option>
+          <option value="system">system</option>
         </select>
       </div>
 
       <!-- Count and Clear Screen -->
       <div class="filter-right-tools">
         <span class="matched-count">
-          匹配 <strong>{{ filteredLogs.length }}</strong> / {{ logs.length }} 行
+          <strong>{{ filteredLogs.length }}</strong> / {{ logs.length }}
         </span>
-        <button class="btn-text-sm" @click="clearConsole" title="临时清除屏幕显示的日志">
-          清屏
+        <button class="btn-text-sm" @click="clearConsole" :title="t('logs.btn_clear')">
+          {{ t('logs.btn_clear') }}
         </button>
       </div>
     </div>
@@ -383,9 +383,9 @@ onUnmounted(() => {
         <div v-if="filteredLogs.length === 0" class="console-empty">
           <Terminal :size="36" class="empty-icon" />
           <p v-if="searchQuery || selectedLevel !== 'ALL' || selectedTag !== 'all'">
-            未找到符合筛选条件的日志（搜索词: "{{ searchQuery }}"）
+            {{ t('logs.no_matching_logs', { query: searchQuery }) }}
           </p>
-          <p v-else>暂无实时日志记录，等待服务事件写入...</p>
+          <p v-else>{{ t('logs.waiting_for_events') }}</p>
         </div>
 
         <div
@@ -394,7 +394,7 @@ onUnmounted(() => {
           class="log-row"
           :class="log.level.toLowerCase()"
           @dblclick="copyLogLine(log.raw)"
-          title="双击复制此行原始日志"
+          :title="t('logs.copy_row_dblclick')"
         >
           <!-- Line number -->
           <span class="log-num">{{ idx + 1 }}</span>
@@ -422,7 +422,7 @@ onUnmounted(() => {
           <button
             class="btn-copy-line"
             @click.stop="copyLogLine(log.raw)"
-            title="复制单行"
+            :title="t('logs.copy_line')"
           >
             <Copy :size="11" />
           </button>
@@ -436,7 +436,7 @@ onUnmounted(() => {
         <div class="modal-header">
           <div class="modal-title-row">
             <Archive :size="18" class="text-accent" />
-            <h3>日志快照备份管理</h3>
+            <h3>{{ t('logs.modal_backup_title') }}</h3>
           </div>
           <button class="close-btn" @click="showBackupModal = false">&times;</button>
         </div>
@@ -444,12 +444,12 @@ onUnmounted(() => {
         <div class="modal-body">
           <!-- Create Backup Bar -->
           <div class="create-backup-section">
-            <label class="section-lbl">创建当前日志快照备份</label>
+            <label class="section-lbl">{{ t('logs.modal_backup_title') }}</label>
             <div class="create-input-row">
               <input
                 type="text"
                 v-model="backupLabel"
-                placeholder="填写备份备注（如: 分流异常排查前, 压力测试快照）"
+                :placeholder="t('logs.modal_backup_ph')"
                 class="form-input"
                 @keydown.enter="createLogBackup"
               />
@@ -459,28 +459,28 @@ onUnmounted(() => {
                 @click="createLogBackup"
               >
                 <Archive :size="13" />
-                <span>{{ creatingBackup ? '正在备份...' : '立即创建备份' }}</span>
+                <span>{{ creatingBackup ? t('logs.modal_backup_creating') : t('logs.modal_backup_create') }}</span>
               </button>
             </div>
           </div>
 
           <!-- Existing Backups List -->
           <div class="backups-list-section">
-            <label class="section-lbl">历史日志快照文件 (共 {{ backupsList.length }} 份)</label>
+            <label class="section-lbl">{{ t('logs.modal_backup_title') }} ({{ backupsList.length }})</label>
 
             <div v-if="backupsList.length === 0" class="backups-empty">
               <FileText :size="32" class="text-muted" />
-              <p>暂无历史日志备份，你可以点击上方按钮创建快照。</p>
+              <p>{{ t('logs.modal_backup_empty') }}</p>
             </div>
 
             <div v-else class="backups-table-wrap">
               <table class="backups-table">
                 <thead>
                   <tr>
-                    <th>备份文件名</th>
-                    <th style="width: 100px">文件大小</th>
-                    <th style="width: 150px">创建时间</th>
-                    <th style="width: 120px; text-align: right">操作</th>
+                    <th>{{ t('common.name') }}</th>
+                    <th style="width: 100px">{{ t('common.size') }}</th>
+                    <th style="width: 150px">{{ t('common.time') }}</th>
+                    <th style="width: 120px; text-align: right">{{ t('common.action') }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -492,14 +492,14 @@ onUnmounted(() => {
                       <button
                         class="btn-icon"
                         @click="downloadBackupItem(b.name)"
-                        title="下载此备份日志"
+                        :title="t('common.download')"
                       >
                         <Download :size="13" />
                       </button>
                       <button
                         class="btn-icon delete"
                         @click="deleteBackupItem(b.name)"
-                        title="删除此备份"
+                        :title="t('common.delete')"
                       >
                         <Trash2 :size="13" />
                       </button>
@@ -512,7 +512,7 @@ onUnmounted(() => {
         </div>
 
         <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showBackupModal = false">关闭</button>
+          <button class="btn btn-secondary" @click="showBackupModal = false">{{ t('common.close') }}</button>
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, shallowRef, computed, watch } from 'vue'
+import { t } from '../composables/useSettings'
 import {
   Save,
   CheckCircle2,
@@ -331,7 +332,7 @@ async function loadConfig(profileName?: string) {
     await fetchConfigProfiles()
     isDirty.value = false
   } catch (err: any) {
-    alert('加载配置失败: ' + err.message)
+    alert(t('config.load_fail', { error: err.message }))
   } finally {
     loading.value = false
   }
@@ -339,7 +340,7 @@ async function loadConfig(profileName?: string) {
 
 async function handleSelectProfile(name: string) {
   if (isDirty.value) {
-    if (!confirm('当前配置有未保存修改，切换配置文件将丢失未保存的改动，确认继续切换吗？')) {
+    if (!confirm(t('config.confirm_unsaved_switch'))) {
       return
     }
   }
@@ -349,7 +350,7 @@ async function handleSelectProfile(name: string) {
 
 async function activateSelectedProfile(name?: string) {
   const target = name || currentSelectedConfig.value
-  if (!confirm(`确认使配置文件 [${target}] 生效到主 dae 服务吗？\n生效后系统将自动重载网络配置。`)) {
+  if (!confirm(t('config.confirm_activate', { name: target }))) {
     return
   }
   activatingConfig.value = true
@@ -361,14 +362,14 @@ async function activateSelectedProfile(name?: string) {
     })
     const data = await res.json()
     if (res.ok) {
-      alert(`生效成功！\n${data.message || ''}`)
+      alert(t('config.activate_success', { message: data.message || '' }))
       await fetchConfigProfiles()
       await loadConfig(target)
     } else {
-      alert('生效失败: ' + (data.error || '') + '\n' + (data.details || ''))
+      alert(t('config.activate_fail', { error: data.error || '', details: data.details || '' }))
     }
   } catch (e: any) {
-    alert('请求失败: ' + e.message)
+    alert(t('config.req_fail', { error: e.message }))
   } finally {
     activatingConfig.value = false
   }
@@ -382,7 +383,7 @@ function openCreateProfileModal() {
 async function createNewProfile() {
   let name = newProfileName.value.trim()
   if (!name) {
-    alert('请输入配置文件名称')
+    alert(t('config.name_required'))
     return
   }
   if (!name.endsWith('.dae')) {
@@ -397,37 +398,37 @@ async function createNewProfile() {
     const data = await res.json()
     if (res.ok) {
       showNewProfileModal.value = false
-      alert(`配置文件 [${data.name}] 创建成功！\n节点、策略组与分流规则均为初始空白状态。`)
+      alert(t('config.create_success', { name: data.name }))
       await fetchConfigProfiles()
       await handleSelectProfile(data.name)
     } else {
-      alert('创建失败: ' + (data.error || '') + '\n' + (data.details || ''))
+      alert(t('config.create_fail', { error: data.error || '', details: data.details || '' }))
     }
   } catch (e: any) {
-    alert('请求失败: ' + e.message)
+    alert(t('config.req_fail', { error: e.message }))
   }
 }
 
 async function deleteProfile(name: string) {
   if (name === activeRunningConfig.value) {
-    alert('当前运行中的主配置不能删除！')
+    alert(t('config.cannot_delete_active'))
     return
   }
-  if (!confirm(`确认删除配置文件 [${name}] 吗？`)) return
+  if (!confirm(t('config.confirm_delete_profile', { name }))) return
   try {
     const res = await fetch(`/api/configs/${encodeURIComponent(name)}`, { method: 'DELETE' })
     const data = await res.json()
     if (res.ok) {
-      alert('删除成功！')
+      alert(t('config.delete_success'))
       await fetchConfigProfiles()
       if (currentSelectedConfig.value === name) {
         await handleSelectProfile(activeRunningConfig.value)
       }
     } else {
-      alert('删除失败: ' + (data.error || ''))
+      alert(t('config.delete_fail', { error: data.error || '' }))
     }
   } catch (e: any) {
-    alert('请求错误: ' + e.message)
+    alert(t('config.req_fail', { error: e.message }))
   }
 }
 
@@ -444,7 +445,7 @@ function openCopyProfileModal() {
 async function copyCurrentProfile() {
   let name = copyProfileName.value.trim()
   if (!name) {
-    alert('请输入新建文件名称')
+    alert(t('config.copy_name_required'))
     return
   }
   if (!name.endsWith('.dae')) {
@@ -459,14 +460,14 @@ async function copyCurrentProfile() {
     const data = await res.json()
     if (res.ok) {
       showCopyProfileModal.value = false
-      alert(`成功复制并新建配置文件 [${data.name}]！`)
+      alert(t('config.copy_success', { name: data.name }))
       await fetchConfigProfiles()
       await handleSelectProfile(data.name)
     } else {
-      alert('复制失败: ' + (data.error || '') + '\n' + (data.details || ''))
+      alert(t('config.copy_fail', { error: data.error || '', details: data.details || '' }))
     }
   } catch (e: any) {
-    alert('请求失败: ' + e.message)
+    alert(t('config.req_fail', { error: e.message }))
   }
 }
 
@@ -508,11 +509,11 @@ async function fetchSubNodes(sub: ConfigSubItem) {
       }))
       selectAllSubNodes.value = true
     } else {
-      alert('读取订阅节点失败: ' + (data.error || ''))
+      alert(t('config.sub_read_fail', { error: data.error || '' }))
       showSubNodesModal.value = false
     }
   } catch (e: any) {
-    alert('请求失败: ' + e.message)
+    alert(t('config.req_fail', { error: e.message }))
     showSubNodesModal.value = false
   } finally {
     fetchingSubNodes.value = false
@@ -533,7 +534,7 @@ const selectedSubNodesCount = computed(() => {
 function importSelectedSubNodes() {
   const selected = subFetchedNodes.value.filter(n => n.selected)
   if (selected.length === 0) {
-    alert('请至少勾选一个要导入的代理节点')
+    alert(t('config.select_at_least_one_node'))
     return
   }
 
@@ -560,7 +561,7 @@ function importSelectedSubNodes() {
   isDirty.value = true
   syncModelToCode()
   showSubNodesModal.value = false
-  alert(`已成功导入 ${importedCount} 个节点到当前配置 [${currentSelectedConfig.value}]！\n请点击右上角「保存配置」完成写入。`)
+  alert(t('config.import_success', { count: importedCount, name: currentSelectedConfig.value }))
   activeSection.value = 'nodes'
 }
 
@@ -614,16 +615,16 @@ async function validateContent(content: string, showAlert = true) {
     validationStatus.value = {
       checked: true,
       valid: data.valid,
-      message: data.message || (data.valid ? '语法与规则完全有效' : '验证未通过')
+      message: data.message || (data.valid ? t('config.val_valid') : t('config.val_invalid'))
     }
     if (showAlert && !data.valid) {
-      alert('dae validate 错误提示:\n' + data.message)
+      alert(t('config.val_error_alert', { message: data.message }))
     }
   } catch (e: any) {
     validationStatus.value = {
       checked: true,
       valid: false,
-      message: '验证请求失败: ' + e.message
+      message: t('config.req_fail', { error: e.message })
     }
   } finally {
     validating.value = false
@@ -636,7 +637,7 @@ async function saveConfig() {
   }
 
   if (!validationStatus.value.valid && validationStatus.value.checked) {
-    if (!confirm('当前配置检测存在语法或校验错误，确认强行保存吗？')) {
+    if (!confirm(t('config.confirm_force_save'))) {
       return
     }
   }
@@ -656,13 +657,13 @@ async function saveConfig() {
     const data = await res.json()
     if (res.ok) {
       isDirty.value = false
-      alert(`保存成功！[${currentSelectedConfig.value}]` + (data.reloaded ? ' (dae 服务已自动热重载)' : ''))
+      alert(t('config.save_success', { name: currentSelectedConfig.value }) + (data.reloaded ? t('config.reloaded_notice') : ''))
       loadConfig(currentSelectedConfig.value)
     } else {
-      alert('保存失败: ' + (data.error || '') + '\n' + (data.details || ''))
+      alert(t('config.save_fail', { error: data.error || '', details: data.details || '' }))
     }
   } catch (e: any) {
-    alert('网络请求失败: ' + e.message)
+    alert(t('config.req_fail', { error: e.message }))
   } finally {
     saving.value = false
   }
@@ -690,7 +691,7 @@ function openEditNode(node: ConfigNodeItem) {
 
 function saveNodeModal() {
   if (!editingNode.value.key || !editingNode.value.url) {
-    alert('请填写节点标识 Key 与连接 URL')
+    alert(t('config.node_key_url_req'))
     return
   }
   if (nodeModalMode.value === 'add') {
@@ -707,7 +708,7 @@ function saveNodeModal() {
 }
 
 function deleteNode(key: string) {
-  if (!confirm(`确认删除节点 [${key}]？`)) return
+  if (!confirm(t('config.confirm_delete_node', { key }))) return
   configModel.value.nodes = configModel.value.nodes.filter(n => n.key !== key)
   isDirty.value = true
   syncModelToCode()
@@ -736,7 +737,7 @@ function openEditGroup(g: ConfigGroupItem) {
 
 function saveGroupModal() {
   if (!editingGroup.value.name) {
-    alert('组名不能为空')
+    alert(t('config.group_name_req'))
     return
   }
   const filters = editingGroup.value.filtersText
@@ -765,7 +766,7 @@ function saveGroupModal() {
 }
 
 function deleteGroup(name: string) {
-  if (!confirm(`确认删除策略组 [${name}]？`)) return
+  if (!confirm(t('config.confirm_delete_group', { name }))) return
   configModel.value.groups = configModel.value.groups.filter(g => g.name !== name)
   isDirty.value = true
   syncModelToCode()
@@ -898,7 +899,7 @@ function saveRouteModal() {
     finalTarget = editingRoute.value.customTarget.trim()
   }
   if (!editingRoute.value.condition || !finalTarget) {
-    alert('分流匹配条件与目标出口动作不能为空')
+    alert(t('routing.condition_target_required'))
     return
   }
 
@@ -1025,7 +1026,7 @@ async function handleFileSelect(e: Event) {
   reader.onload = async (event) => {
     const content = event.target?.result as string
     if (typeof content === 'string') {
-      if (confirm(`准备导入文件: ${file.name}，是否载入？`)) {
+      if (confirm(t('config.confirm_import_file', { name: file.name }))) {
         setEditorText(content)
         isDirty.value = true
         validateContent(content, true)
@@ -1066,12 +1067,12 @@ async function createManualBackup() {
       await fetchBackups()
     }
   } catch (e) {
-    alert('备份失败: ' + e)
+    alert(t('config.save_fail', { error: String(e), details: '' }))
   }
 }
 
 async function restoreBackup(name: string) {
-  if (!confirm(`确认回滚恢复此备份？\n[${name}]\n恢复后当前未保存的编辑将被替换。`)) return
+  if (!confirm(t('config.confirm_rollback_backup', { name }))) return
   try {
     const res = await fetch('/api/backups/restore', {
       method: 'POST',
@@ -1080,24 +1081,24 @@ async function restoreBackup(name: string) {
     })
     const data = await res.json()
     if (res.ok) {
-      alert('恢复成功！')
+      alert(t('config.rollback_success'))
       showBackupModal.value = false
       loadConfig()
     } else {
-      alert('恢复失败: ' + (data.error || ''))
+      alert(t('config.rollback_fail', { error: data.error || '' }))
     }
   } catch (e: any) {
-    alert('请求失败: ' + e.message)
+    alert(t('config.req_fail', { error: e.message }))
   }
 }
 
 async function deleteBackup(name: string) {
-  if (!confirm(`确定删除备份文件 [${name}] 吗？`)) return
+  if (!confirm(t('config.confirm_delete_backup', { name }))) return
   try {
     const res = await fetch(`/api/backups/${encodeURIComponent(name)}`, { method: 'DELETE' })
     if (res.ok) await fetchBackups()
   } catch (e) {
-    alert('删除失败: ' + e)
+    alert(t('config.delete_fail', { error: String(e) }))
   }
 }
 
@@ -1131,7 +1132,7 @@ onMounted(() => {
             @click="switchMode('form')"
           >
             <LayoutGrid :size="14" />
-            <span>可视化表单</span>
+            <span>{{ t('config.mode.form') }}</span>
           </button>
           <button
             class="mode-btn"
@@ -1139,7 +1140,7 @@ onMounted(() => {
             @click="switchMode('code')"
           >
             <Code :size="14" />
-            <span>专业全文编辑</span>
+            <span>{{ t('config.mode.code') }}</span>
           </button>
         </div>
 
@@ -1151,43 +1152,42 @@ onMounted(() => {
               :value="currentSelectedConfig"
               @change="handleSelectProfile(($event.target as HTMLSelectElement).value)"
               class="profile-select"
-              title="切换当前编辑的配置文件方案"
+              :title="t('config.switch_profile')"
             >
               <option
                 v-for="p in configProfiles"
                 :key="p.name"
                 :value="p.name"
               >
-                {{ p.name }} {{ p.isActive ? ' [当前生效]' : '' }}
+                {{ p.name }} {{ p.isActive ? ` [${t('common.active')}]` : '' }}
               </option>
             </select>
-            <span v-if="isDirty" class="dirty-dot" title="有未保存修改">●</span>
+            <span v-if="isDirty" class="dirty-dot">●</span>
           </div>
 
           <!-- 生效状态标签 / 一键生效按钮 -->
           <span
             v-if="currentSelectedConfig === activeRunningConfig"
             class="badge-active"
-            title="该配置方案当前正在作为主服务运行生效"
           >
-            <span class="active-indicator"></span>已生效
+            <span class="active-indicator"></span>{{ t('common.active') }}
           </span>
           <button
             v-else
             class="btn btn-sm btn-activate"
             :disabled="activatingConfig"
             @click="activateSelectedProfile(currentSelectedConfig)"
-            title="将该配置应用到主运行配置并热重载生效"
+            :title="t('config.activate_btn')"
           >
             <Check :size="13" />
-            <span>{{ activatingConfig ? '生效中...' : '一键生效' }}</span>
+            <span>{{ activatingConfig ? t('config.activating') : t('config.activate_btn') }}</span>
           </button>
 
           <!-- 新建与删除按钮 -->
           <button
             class="btn-icon-subtle"
             @click="openCreateProfileModal"
-            title="新建空白配置文件方案"
+            :title="t('common.add')"
           >
             <Plus :size="14" />
           </button>
@@ -1195,7 +1195,7 @@ onMounted(() => {
           <button
             class="btn-icon-subtle"
             @click="openCopyProfileModal"
-            title="复制当前配置文件并新建文件"
+            :title="t('common.copy')"
           >
             <Copy :size="14" />
           </button>
@@ -1204,7 +1204,7 @@ onMounted(() => {
             v-if="currentSelectedConfig !== activeRunningConfig"
             class="btn-icon-subtle danger"
             @click="deleteProfile(currentSelectedConfig)"
-            title="删除当前选中的从属配置文件"
+            :title="t('common.delete')"
           >
             <Trash2 :size="14" />
           </button>
@@ -1217,10 +1217,10 @@ onMounted(() => {
           class="btn btn-secondary"
           :disabled="validating"
           @click="validateContent(configContent, true)"
-          title="调用 dae validate 校验配置文件"
+          :title="t('config.validate_btn')"
         >
           <ShieldCheck class="icon" :size="15" />
-          <span>{{ validating ? '校验中...' : '语法校验' }}</span>
+          <span>{{ validating ? t('config.validating') : t('config.validate_btn') }}</span>
         </button>
 
         <!-- Import / Export -->
@@ -1231,32 +1231,32 @@ onMounted(() => {
           class="hidden"
           @change="handleFileSelect"
         />
-        <button class="btn btn-secondary" @click="triggerImport" title="从本地上传导入配置">
+        <button class="btn btn-secondary" @click="triggerImport" :title="t('common.restore')">
           <Upload class="icon" :size="15" />
-          <span>导入</span>
+          <span>{{ t('common.restore') }}</span>
         </button>
 
-        <button class="btn btn-secondary" @click="exportConfig" title="下载导出当前配置">
+        <button class="btn btn-secondary" @click="exportConfig" :title="t('common.download')">
           <Download class="icon" :size="15" />
-          <span>导出</span>
+          <span>{{ t('common.download') }}</span>
         </button>
 
-        <button class="btn btn-secondary" @click="openBackupManager" title="查看与还原历史备份">
+        <button class="btn btn-secondary" @click="openBackupManager" :title="t('config.backup_btn')">
           <Archive class="icon" :size="15" />
-          <span>备份管理</span>
+          <span>{{ t('config.backup_btn') }}</span>
         </button>
 
         <div class="divider"></div>
 
-        <label class="checkbox-label" title="保存后自动触发 systemctl reload dae">
+        <label class="checkbox-label" :title="t('config.reload_switch')">
           <input type="checkbox" v-model="reloadAfterSave" />
-          <span>自动重载</span>
+          <span>{{ t('config.reload_switch') }}</span>
         </label>
 
         <!-- Save Button -->
         <button class="btn btn-primary" :disabled="saving" @click="saveConfig">
           <Save class="icon" :size="15" />
-          <span>{{ saving ? '保存中...' : '保存配置' }}</span>
+          <span>{{ saving ? t('config.saving') : t('config.save_btn') }}</span>
         </button>
       </div>
     </header>
@@ -1273,7 +1273,7 @@ onMounted(() => {
             @click="activeSection = 'nodes'"
           >
             <Server :size="15" />
-            <span>节点配置</span>
+            <span>{{ t('config.section.nodes') }}</span>
             <span class="count-pill">{{ configModel.nodes.length }}</span>
           </button>
           <button
@@ -1282,7 +1282,7 @@ onMounted(() => {
             @click="activeSection = 'groups'"
           >
             <Layers :size="15" />
-            <span>策略组</span>
+            <span>{{ t('config.section.groups') }}</span>
             <span class="count-pill">{{ configModel.groups.length }}</span>
           </button>
           <button
@@ -1291,7 +1291,7 @@ onMounted(() => {
             @click="activeSection = 'routing'"
           >
             <GitFork :size="15" />
-            <span>分流规则</span>
+            <span>{{ t('config.section.routing') }}</span>
             <span class="count-pill">{{ configModel.routingRules.length }}</span>
           </button>
           <button
@@ -1300,7 +1300,7 @@ onMounted(() => {
             @click="activeSection = 'global'"
           >
             <Sliders :size="15" />
-            <span>全局参数</span>
+            <span>{{ t('config.section.global') }}</span>
           </button>
           <button
             class="subnav-item"
@@ -1308,7 +1308,7 @@ onMounted(() => {
             @click="activeSection = 'subscriptions'"
           >
             <Download :size="15" />
-            <span>订阅管理</span>
+            <span>{{ t('config.section.subscriptions') }}</span>
             <span class="count-pill">{{ configModel.subscriptions.length }}</span>
           </button>
         </div>
@@ -1317,20 +1317,20 @@ onMounted(() => {
         <div v-if="activeSection === 'nodes'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>代理节点配置</h3>
-              <p>支持协议链接（VLESS, Trojan, SS, VMess, Hysteria2, SOCKS5 等）快速解析与增删改</p>
+              <h3>{{ t('config.section.nodes') }}</h3>
+              <p>{{ t('config.nodes_desc') }}</p>
             </div>
             <button class="btn btn-primary" @click="openAddNode">
-              <Plus :size="14" /> 添加新节点
+              <Plus :size="14" /> {{ t('config.new_node') }}
             </button>
           </div>
 
           <div v-if="configModel.nodes.length === 0" class="empty-state-box">
             <Server class="empty-icon" :size="36" />
-            <div class="empty-text">当前配置文件中暂无代理节点</div>
-            <p class="empty-subtext">你可以点击下方按钮添加节点，或在顶部切换其他配置文件</p>
+            <div class="empty-text">{{ t('config.nodes_empty') }}</div>
+            <p class="empty-subtext">{{ t('config.nodes_empty_sub') }}</p>
             <button class="btn btn-primary btn-sm" @click="openAddNode">
-              <Plus :size="13" /> 添加新节点
+              <Plus :size="13" /> {{ t('config.new_node') }}
             </button>
           </div>
 
@@ -1340,21 +1340,21 @@ onMounted(() => {
                 <span class="proto-badge">{{ node.protocol || 'NODE' }}</span>
                 <span class="card-key">{{ node.key }}</span>
                 <div class="card-actions">
-                  <button class="btn-icon" @click="openEditNode(node)" title="编辑节点">
+                  <button class="btn-icon" @click="openEditNode(node)" :title="t('common.edit')">
                     <Edit2 :size="13" />
                   </button>
-                  <button class="btn-icon delete" @click="deleteNode(node.key)" title="删除节点">
+                  <button class="btn-icon delete" @click="deleteNode(node.key)" :title="t('common.delete')">
                     <Trash2 :size="13" />
                   </button>
                 </div>
               </div>
               <div class="card-info">
                 <div class="row">
-                  <span class="lbl">别名:</span>
+                  <span class="lbl">{{ t('config.node_alias') }}:</span>
                   <span class="val bold truncate" :title="node.name">{{ node.name || node.key }}</span>
                 </div>
                 <div class="row">
-                  <span class="lbl">目标:</span>
+                  <span class="lbl">{{ t('config.node_target') }}:</span>
                   <span class="val mono truncate" :title="`${node.address}:${node.port}`">{{ node.address }}:{{ node.port }}</span>
                 </div>
               </div>
@@ -1366,20 +1366,20 @@ onMounted(() => {
         <div v-else-if="activeSection === 'groups'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>出站策略与分组</h3>
-              <p>定义各分组策略：<code>min_moving_avg</code>、<code>min_avg10</code>、<code>fixed</code>、<code>random</code> 等</p>
+              <h3>{{ t('config.section.groups') }}</h3>
+              <p>{{ t('config.groups_desc') }}</p>
             </div>
             <button class="btn btn-primary" @click="openAddGroup">
-              <Plus :size="14" /> 添加策略组
+              <Plus :size="14" /> {{ t('config.new_group') }}
             </button>
           </div>
 
           <div v-if="configModel.groups.length === 0" class="empty-state-box">
             <Layers class="empty-icon" :size="36" />
-            <div class="empty-text">当前配置文件中暂无策略组</div>
-            <p class="empty-subtext">定义分组策略与过滤规则，聚合节点出站流量</p>
+            <div class="empty-text">{{ t('config.groups_empty') }}</div>
+            <p class="empty-subtext">{{ t('config.groups_empty_sub') }}</p>
             <button class="btn btn-primary btn-sm" @click="openAddGroup">
-              <Plus :size="13" /> 添加策略组
+              <Plus :size="13" /> {{ t('config.new_group') }}
             </button>
           </div>
 
@@ -1389,21 +1389,21 @@ onMounted(() => {
                 <span class="group-badge">Group</span>
                 <span class="card-key">{{ group.name }}</span>
                 <div class="card-actions">
-                  <button class="btn-icon" @click="openEditGroup(group)" title="编辑策略组">
+                  <button class="btn-icon" @click="openEditGroup(group)" :title="t('common.edit')">
                     <Edit2 :size="13" />
                   </button>
-                  <button class="btn-icon delete" @click="deleteGroup(group.name)" title="删除分组">
+                  <button class="btn-icon delete" @click="deleteGroup(group.name)" :title="t('common.delete')">
                     <Trash2 :size="13" />
                   </button>
                 </div>
               </div>
               <div class="card-info">
                 <div class="row">
-                  <span class="lbl">出站策略:</span>
-                  <span class="val code-tag">{{ group.policy || '默认' }}</span>
+                  <span class="lbl">{{ t('config.field.group_policy') }}:</span>
+                  <span class="val code-tag">{{ group.policy || 'default' }}</span>
                 </div>
                 <div class="filter-list">
-                  <span class="lbl">节点过滤:</span>
+                  <span class="lbl">{{ t('config.field.group_filters') }}:</span>
                   <div class="chips-wrap">
                     <span v-for="(f, i) in group.filters" :key="i" class="filter-chip">
                       {{ f }}
@@ -1420,34 +1420,31 @@ onMounted(() => {
           <div class="section-title-bar">
             <div>
               <div class="title-with-badge">
-                <h3>分流与路由规则</h3>
+                <h3>{{ t('config.section.routing') }}</h3>
                 <span
                   v-if="routingHealthReport.hasErrors"
                   class="health-badge danger"
-                  title="检测到规则冲突或死规则错误"
                 >
-                  <ShieldAlert :size="12" /> 存在 {{ routingHealthReport.conflicts.filter(c => c.severity === 'error').length }} 项严重错误
+                  <ShieldAlert :size="12" /> {{ routingHealthReport.conflicts.filter(c => c.severity === 'error').length }}
                 </span>
                 <span
                   v-else-if="routingHealthReport.hasWarnings"
                   class="health-badge warning"
-                  title="检测到规则遮蔽或冗余警告"
                 >
-                  <AlertTriangle :size="12" /> 存在 {{ routingHealthReport.conflicts.filter(c => c.severity === 'warning').length }} 项优化警告
+                  <AlertTriangle :size="12" /> {{ routingHealthReport.conflicts.filter(c => c.severity === 'warning').length }}
                 </span>
                 <span
                   v-else-if="configModel.routingRules.length > 0"
                   class="health-badge success"
-                  title="规则语法与匹配顺序完全健康"
                 >
-                  <ShieldCheck :size="12" /> 规则健康良好
+                  <ShieldCheck :size="12" />
                 </span>
               </div>
-              <p>匹配流量特征（geosite, geoip, dip, dport, pname 等）并按自上而下「首条命中即终止」原则导向出口</p>
+              <p>{{ t('config.rules_desc') }}</p>
             </div>
             <div class="title-actions">
               <button class="btn btn-primary" @click="openAddRoute">
-                <Plus :size="14" /> 添加路由规则
+                <Plus :size="14" /> {{ t('config.new_rule') }}
               </button>
             </div>
           </div>
@@ -1458,8 +1455,8 @@ onMounted(() => {
             <div v-if="!routingHealthReport.hasErrors && !routingHealthReport.hasWarnings && routingHealthReport.conflicts.length === 0" class="health-summary-banner success">
               <ShieldCheck class="banner-icon" :size="18" />
               <div class="banner-text">
-                <span class="banner-title">分流规则逻辑健康</span>
-                <span class="banner-sub">共 {{ configModel.routingRules.length }} 条规则，未检测到死规则遮蔽、重复规则或兜底顺序错误。所有规则将按顺序执行。</span>
+                <span class="banner-title">{{ t('routing.conflict_healthy') }}</span>
+                <span class="banner-sub">{{ t('routing.health_ok_desc', { count: configModel.routingRules.length }) }}</span>
               </div>
             </div>
 
@@ -1471,15 +1468,15 @@ onMounted(() => {
                   <AlertTriangle v-else class="status-icon warning" :size="20" />
                   <div>
                     <h4 class="conflict-card-title">
-                      规则冲突与优化诊断
-                      <span class="conflict-count-pill">共 {{ routingHealthReport.conflicts.length }} 项提示</span>
+                      {{ t('routing.conflict_report_title') }}
+                      <span class="conflict-count-pill">{{ t('routing.conflict_items_count', { count: routingHealthReport.conflicts.length }) }}</span>
                     </h4>
                     <p class="conflict-card-subtitle">
-                      dae 按照从上到下的顺序进行路由判定（First-Match-Wins）。以下规则可能存在遮蔽死代码或潜在网络访问问题：
+                      {{ t('routing.conflict_report_desc') }}
                     </p>
                   </div>
                 </div>
-                <button class="btn-icon-subtle toggle-collapse-btn" :title="showConflictDetails ? '收起详情' : '展开详情'">
+                <button class="btn-icon-subtle toggle-collapse-btn" :title="showConflictDetails ? t('common.collapse') : t('common.expand')">
                   <ChevronUp v-if="showConflictDetails" :size="16" />
                   <ChevronDown v-else :size="16" />
                 </button>
@@ -1494,17 +1491,17 @@ onMounted(() => {
                 >
                   <div class="conflict-item-header">
                     <span class="sev-tag" :class="conflict.severity">
-                      {{ conflict.severity === 'error' ? '错误 / 逻辑冲突' : (conflict.severity === 'warning' ? '警告 / 阴影规则' : '最佳实践建议') }}
+                      {{ conflict.severity === 'error' ? t('routing.diag_error') : (conflict.severity === 'warning' ? t('routing.diag_warning') : t('routing.diag_suggestion')) }}
                     </span>
                     <span class="conflict-name">{{ conflict.title }}</span>
                     <div v-if="conflict.ruleIndices.length > 0" class="involved-rules">
-                      <span class="lbl-involved">涉及规则:</span>
+                      <span class="lbl-involved">{{ t('routing.diag_involved_lines') }}:</span>
                       <button
                         v-for="idx in conflict.ruleIndices"
                         :key="idx"
                         class="rule-link-chip"
                         @click="highlightRule(idx)"
-                        title="点击在列表中定位高亮该条规则"
+                        :title="t('routing.diag_highlight_tip')"
                       >
                         #{{ idx + 1 }}
                       </button>
@@ -1514,7 +1511,7 @@ onMounted(() => {
                   <div class="conflict-suggestion">
                     <Lightbulb class="sugg-icon" :size="14" />
                     <div class="sugg-content">
-                      <span class="sugg-label">优化修改建议:</span>
+                      <span class="sugg-label">{{ t('routing.diag_sugg_label') }}:</span>
                       <span>{{ conflict.suggestion }}</span>
                     </div>
                     <!-- Quick action buttons -->
@@ -1523,17 +1520,17 @@ onMounted(() => {
                         v-if="conflict.id === 'missing-private-bypass'"
                         class="btn btn-sm btn-quick-fix"
                         @click="fixMissingPrivateBypass"
-                        title="在规则列表顶部自动插入 dip(geoip:private) -> direct"
+                        :title="t('routing.diag_fix_private')"
                       >
-                        <Wand2 :size="12" /> 一键在顶部插入私网直连
+                        <Wand2 :size="12" /> {{ t('routing.diag_fix_private') }}
                       </button>
                       <button
                         v-if="conflict.id === 'fallback-not-last'"
                         class="btn btn-sm btn-quick-fix"
                         @click="fixFallbackOrder"
-                        title="自动将 fallback 规则移至列表最后一行"
+                        :title="t('routing.diag_fix_fallback')"
                       >
-                        <Wand2 :size="12" /> 一键将 Fallback 移至末尾
+                        <Wand2 :size="12" /> {{ t('routing.diag_fix_fallback') }}
                       </button>
                     </div>
                   </div>
@@ -1544,10 +1541,10 @@ onMounted(() => {
 
           <div v-if="configModel.routingRules.length === 0" class="empty-state-box">
             <GitFork class="empty-icon" :size="36" />
-            <div class="empty-text">当前配置文件中暂无分流规则</div>
-            <p class="empty-subtext">设置域名、IP、端口等分流匹配条件与出站动作</p>
+            <div class="empty-text">{{ t('routing.empty_title') }}</div>
+            <p class="empty-subtext">{{ t('routing.empty_desc') }}</p>
             <button class="btn btn-primary btn-sm" @click="openAddRoute">
-              <Plus :size="13" /> 添加路由规则
+              <Plus :size="13" /> {{ t('config.new_rule') }}
             </button>
           </div>
 
@@ -1556,10 +1553,10 @@ onMounted(() => {
               <thead>
                 <tr>
                   <th style="width: 60px">#</th>
-                  <th>匹配条件</th>
-                  <th style="width: 150px">动作出口</th>
-                  <th style="width: 110px">状态健康</th>
-                  <th style="width: 160px; text-align: right">操作与排序</th>
+                  <th>{{ t('routing.col_condition') }}</th>
+                  <th style="width: 150px">{{ t('routing.col_action') }}</th>
+                  <th style="width: 110px">{{ t('routing.col_status') }}</th>
+                  <th style="width: 160px; text-align: right">{{ t('routing.col_order') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1577,7 +1574,7 @@ onMounted(() => {
                     <span class="idx-num">{{ idx + 1 }}</span>
                   </td>
                   <td class="mono cond-cell">
-                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">兜底规则 (固定于末尾)</span>
+                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">{{ t('routing.drag_tip_fallback') }}</span>
                     <span v-else class="rule-condition-text">{{ rule.condition }}</span>
                   </td>
                   <td>
@@ -1589,17 +1586,17 @@ onMounted(() => {
                       class="rule-health-tag danger"
                       :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
                     >
-                      <ShieldAlert :size="12" /> 严重冲突
+                      <ShieldAlert :size="12" /> {{ t('routing.status_conflict') }}
                     </span>
                     <span
                       v-else-if="routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'"
                       class="rule-health-tag warning"
                       :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
                     >
-                      <AlertTriangle :size="12" /> 规则遮蔽
+                      <AlertTriangle :size="12" /> {{ t('routing.status_shadow') }}
                     </span>
-                    <span v-else class="rule-health-tag ok" title="匹配逻辑正常">
-                      <Check :size="12" /> 正常
+                    <span v-else class="rule-health-tag ok" :title="t('routing.status_ok')">
+                      <Check :size="12" /> {{ t('routing.status_ok') }}
                     </span>
                   </td>
                   <td style="text-align: right" class="row-action-cell">
@@ -1608,7 +1605,7 @@ onMounted(() => {
                       class="btn-icon"
                       :disabled="idx === 0"
                       @click="moveRouteUp(idx)"
-                      title="上移此规则 (提升匹配优先级)"
+                      :title="t('routing.table_tip_priority')"
                     >
                       <ArrowUp :size="12" />
                     </button>
@@ -1616,28 +1613,28 @@ onMounted(() => {
                       class="btn-icon"
                       :disabled="idx === configModel.routingRules.length - 1"
                       @click="moveRouteDown(idx)"
-                      title="下移此规则 (降低匹配优先级)"
+                      :title="t('routing.table_tip_priority')"
                     >
                       <ArrowDown :size="12" />
                     </button>
                     <button
                       class="btn-icon"
                       @click="duplicateRoute(idx)"
-                      title="复制此规则"
+                      :title="t('common.copy')"
                     >
                       <Copy :size="12" />
                     </button>
                     <button
                       class="btn-icon"
                       @click="openEditRoute(rule, idx)"
-                      title="编辑此规则"
+                      :title="t('common.edit')"
                     >
                       <Edit2 :size="12" />
                     </button>
                     <button
                       class="btn-icon delete"
                       @click="deleteRoute(idx)"
-                      title="删除此规则"
+                      :title="t('common.delete')"
                     >
                       <Trash2 :size="12" />
                     </button>
@@ -1652,14 +1649,14 @@ onMounted(() => {
         <div v-else-if="activeSection === 'global'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>全局网络与代理模式</h3>
-              <p>配置内核参数、代理端口、网络接口及连通性探测设置</p>
+              <h3>{{ t('config.section.global') }}</h3>
+              <p>{{ t('config.global_desc') }}</p>
             </div>
           </div>
 
           <div class="form-grid">
             <div class="form-group">
-              <label>日志等级 (log_level)</label>
+              <label>{{ t('config.field.global_log_level') }}</label>
               <select v-model="configModel.globals['log_level']" @change="isDirty = true">
                 <option value="trace">trace</option>
                 <option value="debug">debug</option>
@@ -1670,44 +1667,44 @@ onMounted(() => {
             </div>
 
             <div class="form-group">
-              <label>代理模式 (dial_mode)</label>
+              <label>dial_mode</label>
               <select v-model="configModel.globals['dial_mode']" @change="isDirty = true">
-                <option value="domain">domain (域名分流 - 推荐)</option>
-                <option value="ip">ip (直连 IP 优先)</option>
-                <option value="domain+">domain+ (强制域名嗅探)</option>
+                <option value="domain">domain</option>
+                <option value="ip">ip</option>
+                <option value="domain+">domain+</option>
               </select>
             </div>
 
             <div class="form-group">
-              <label>局域网接口 (lan_interface)</label>
-              <input v-model="configModel.globals['lan_interface']" @input="isDirty = true" placeholder="eth0, ens18" />
+              <label>{{ t('config.field.global_lan_iface') }}</label>
+              <input v-model="configModel.globals['lan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_lan_iface_ph')" />
             </div>
 
             <div class="form-group">
-              <label>广域网接口 (wan_interface)</label>
-              <input v-model="configModel.globals['wan_interface']" @input="isDirty = true" placeholder="eth0, ens18" />
+              <label>{{ t('config.field.global_wan_iface') }}</label>
+              <input v-model="configModel.globals['wan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_wan_iface_ph')" />
             </div>
 
             <div class="form-group">
-              <label>TProxy 端口 (tproxy_port)</label>
-              <input v-model="configModel.globals['tproxy_port']" @input="isDirty = true" placeholder="12345" />
+              <label>{{ t('config.field.global_tproxy_port') }}</label>
+              <input v-model="configModel.globals['tproxy_port']" @input="isDirty = true" :placeholder="t('config.field.global_tproxy_port_ph')" />
             </div>
 
             <div class="form-group">
-              <label>TCP 检测地址 (tcp_check_url)</label>
-              <input v-model="configModel.globals['tcp_check_url']" @input="isDirty = true" placeholder="http://cp.cloudflare.com" />
+              <label>{{ t('config.field.global_tcp_check_url') }}</label>
+              <input v-model="configModel.globals['tcp_check_url']" @input="isDirty = true" :placeholder="t('config.field.global_tcp_check_url_ph')" />
             </div>
 
             <div class="form-group">
-              <label>检测间隔 (check_interval)</label>
+              <label>check_interval</label>
               <input v-model="configModel.globals['check_interval']" @input="isDirty = true" placeholder="30s" />
             </div>
 
             <div class="form-group">
-              <label>允许不安全证书 (allow_insecure)</label>
+              <label>allow_insecure</label>
               <select v-model="configModel.globals['allow_insecure']" @change="isDirty = true">
-                <option value="false">false (严格校验 - 安全)</option>
-                <option value="true">true (允许自签)</option>
+                <option value="false">false</option>
+                <option value="true">true</option>
               </select>
             </div>
           </div>
@@ -1717,20 +1714,20 @@ onMounted(() => {
         <div v-else-if="activeSection === 'subscriptions'" class="form-section-body">
           <div class="section-title-bar">
             <div>
-              <h3>远程订阅配置</h3>
-              <p>绑定外部订阅文件，可在策略组中通过 <code>subtag(标签名)</code> 统一过滤节点</p>
+              <h3>{{ t('config.section.subscriptions') }}</h3>
+              <p>{{ t('config.sub_desc') }}</p>
             </div>
             <button class="btn btn-primary" @click="openAddSub">
-              <Plus :size="14" /> 添加订阅
+              <Plus :size="14" /> {{ t('config.new_sub') }}
             </button>
           </div>
 
           <div v-if="configModel.subscriptions.length === 0" class="empty-state-box">
             <Download class="empty-icon" :size="36" />
-            <div class="empty-text">当前配置文件中暂无订阅源</div>
-            <p class="empty-subtext">配置远程订阅链接，可自动在策略组中过滤提取节点</p>
+            <div class="empty-text">{{ t('config.sub_empty') }}</div>
+            <p class="empty-subtext">{{ t('config.sub_empty_desc') }}</p>
             <button class="btn btn-primary btn-sm" @click="openAddSub">
-              <Plus :size="13" /> 添加订阅
+              <Plus :size="13" /> {{ t('config.new_sub') }}
             </button>
           </div>
 
@@ -1740,10 +1737,10 @@ onMounted(() => {
                 <span class="sub-badge">Sub</span>
                 <span class="card-key">{{ sub.tag }}</span>
                 <div class="card-actions">
-                  <button class="btn-sub-fetch" @click="fetchSubNodes(sub)" title="读取该订阅包含的节点列表">
-                    <ListFilter :size="13" /> 读取节点
+                  <button class="btn-sub-fetch" @click="fetchSubNodes(sub)" :title="t('config.btn_fetch_nodes_tip')">
+                    <ListFilter :size="13" /> {{ t('config.btn_fetch_nodes') }}
                   </button>
-                  <button class="btn-icon delete" @click="deleteSub(sub.tag)" title="删除订阅">
+                  <button class="btn-icon delete" @click="deleteSub(sub.tag)" :title="t('common.delete')">
                     <Trash2 :size="13" />
                   </button>
                 </div>
@@ -1778,14 +1775,14 @@ onMounted(() => {
           <span class="val-msg">{{ validationStatus.message }}</span>
         </div>
         <div v-else class="val-indicator neutral">
-          <span class="val-msg">尚未校验（点击「语法校验」或「保存配置」）</span>
+          <span class="val-msg">{{ t('config.val_not_checked') }}</span>
         </div>
       </div>
 
       <div class="status-right">
-        <span>修改时间: {{ formatDate(lastModTime) }}</span>
-        <button class="btn-text" @click="() => loadConfig()" title="重新从磁盘读取">
-          <RefreshCw class="icon" :size="12" /> 重新载入
+        <span>{{ t('config.last_modified', { time: formatDate(lastModTime) }) }}</span>
+        <button class="btn-text" @click="() => loadConfig()" :title="t('common.reload_disk')">
+          <RefreshCw class="icon" :size="12" /> {{ t('common.reload') }}
         </button>
       </div>
     </footer>
@@ -1794,21 +1791,21 @@ onMounted(() => {
     <div v-if="showNodeModal" class="modal-backdrop" @click.self="showNodeModal = false">
       <div class="modal-card">
         <div class="modal-header">
-          <h3>{{ nodeModalMode === 'add' ? '新增代理节点' : '编辑节点信息' }}</h3>
+          <h3>{{ nodeModalMode === 'add' ? t('config.modal_add_node') : t('config.modal_edit_node') }}</h3>
           <button class="close-btn" @click="showNodeModal = false">&times;</button>
         </div>
         <div class="modal-body form-modal">
           <div class="field">
-            <label>节点唯一标识 Key (如 hk_vless_01)</label>
-            <input v-model="editingNode.key" :disabled="nodeModalMode === 'edit'" placeholder="unique_key" />
+            <label>{{ t('config.field.node_key') }}</label>
+            <input v-model="editingNode.key" :disabled="nodeModalMode === 'edit'" :placeholder="t('config.field.node_key_ph')" />
           </div>
           <div class="field">
-            <label>节点链接 URL (支持主流协议分享链接)</label>
-            <textarea v-model="editingNode.url" rows="3" placeholder="填写节点完整分享链接 (如 key: scheme://...#Alias)"></textarea>
+            <label>{{ t('config.field.node_link') }}</label>
+            <textarea v-model="editingNode.url" rows="3" :placeholder="t('config.field.node_link_ph')"></textarea>
           </div>
           <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showNodeModal = false">取消</button>
-            <button class="btn btn-primary" @click="saveNodeModal">确定保存</button>
+            <button class="btn btn-secondary" @click="showNodeModal = false">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" @click="saveNodeModal">{{ t('common.save') }}</button>
           </div>
         </div>
       </div>
@@ -1818,31 +1815,31 @@ onMounted(() => {
     <div v-if="showGroupModal" class="modal-backdrop" @click.self="showGroupModal = false">
       <div class="modal-card">
         <div class="modal-header">
-          <h3>{{ groupModalMode === 'add' ? '新增代理组' : '编辑代理策略组' }}</h3>
+          <h3>{{ t('config.modal.group_title') }}</h3>
           <button class="close-btn" @click="showGroupModal = false">&times;</button>
         </div>
         <div class="modal-body form-modal">
           <div class="field">
-            <label>分组名称 (如 proxy, streaming, japan)</label>
-            <input v-model="editingGroup.name" :disabled="groupModalMode === 'edit'" placeholder="group_name" />
+            <label>{{ t('config.field.group_name') }}</label>
+            <input v-model="editingGroup.name" :disabled="groupModalMode === 'edit'" :placeholder="t('config.field.group_name_ph')" />
           </div>
           <div class="field">
-            <label>出站策略</label>
+            <label>{{ t('config.field.group_policy') }}</label>
             <select v-model="editingGroup.policy">
-              <option value="min_moving_avg">min_moving_avg (最低滑动平均延迟)</option>
-              <option value="min_avg10">min_avg10 (近10次最低均值)</option>
-              <option value="min">min (最低绝对延迟)</option>
-              <option value="random">random (随机负载均衡)</option>
-              <option value="fixed(0)">fixed(0) (固定首选节点)</option>
+              <option value="min_moving_avg">min_moving_avg</option>
+              <option value="min_avg10">min_avg10</option>
+              <option value="min">min</option>
+              <option value="random">random</option>
+              <option value="fixed(0)">fixed(0)</option>
             </select>
           </div>
           <div class="field">
-            <label>节点过滤规则 (每行一条 filter)</label>
-            <textarea v-model="editingGroup.filtersText" rows="4" placeholder="subtag(mock_sub_a)&#10;name(keyword: 'HK')"></textarea>
+            <label>{{ t('config.field.group_filters') }}</label>
+            <textarea v-model="editingGroup.filtersText" rows="4" :placeholder="t('config.field.group_filters_ph')"></textarea>
           </div>
           <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showGroupModal = false">取消</button>
-            <button class="btn btn-primary" @click="saveGroupModal">确定保存</button>
+            <button class="btn btn-secondary" @click="showGroupModal = false">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" @click="saveGroupModal">{{ t('common.save') }}</button>
           </div>
         </div>
       </div>
@@ -1853,7 +1850,7 @@ onMounted(() => {
       <div class="modal-card modal-lg">
         <div class="modal-header">
           <div class="modal-title-with-tabs">
-            <h3>{{ routeModalMode === 'add' ? '新增路由分流规则' : '编辑分流规则' }}</h3>
+            <h3>{{ routeModalMode === 'add' ? t('routing.editor_title_add') : t('routing.editor_title_edit') }}</h3>
             <div class="modal-subtabs">
               <button
                 class="subtab-btn"
@@ -1861,7 +1858,7 @@ onMounted(() => {
                 @click="routeModalTab = 'form'"
               >
                 <Sliders :size="13" />
-                <span>规则参数配置</span>
+                <span>{{ t('config.route_tab_config') }}</span>
               </button>
               <button
                 class="subtab-btn"
@@ -1869,7 +1866,7 @@ onMounted(() => {
                 @click="routeModalTab = 'guide'"
               >
                 <BookOpen :size="13" />
-                <span>dae 语法指南与示例</span>
+                <span>{{ t('config.route_tab_guide') }}</span>
               </button>
             </div>
           </div>
@@ -1880,7 +1877,7 @@ onMounted(() => {
         <div v-if="routeModalTab === 'form'" class="modal-body form-modal">
           <!-- Input Mode Switcher -->
           <div class="mode-pill-bar">
-            <span class="mode-pill-label">匹配条件模式:</span>
+            <span class="mode-pill-label">{{ t('config.route_mode_label') }}</span>
             <div class="pill-group">
               <button
                 type="button"
@@ -1889,7 +1886,7 @@ onMounted(() => {
                 @click="routeInputMode = 'preset'"
               >
                 <Sparkles :size="12" />
-                <span>⚡ 常用预设模板</span>
+                <span>⚡ {{ t('routing.mode_preset') }}</span>
               </button>
               <button
                 type="button"
@@ -1898,7 +1895,7 @@ onMounted(() => {
                 @click="routeInputMode = 'builder'"
               >
                 <Wand2 :size="12" />
-                <span>🛠️ 结构化构造器</span>
+                <span>🛠️ {{ t('routing.mode_builder') }}</span>
               </button>
               <button
                 type="button"
@@ -1907,7 +1904,7 @@ onMounted(() => {
                 @click="routeInputMode = 'custom'"
               >
                 <Code :size="12" />
-                <span>✏️ 手写专家代码</span>
+                <span>✏️ {{ t('routing.mode_custom') }}</span>
               </button>
             </div>
           </div>
@@ -1915,13 +1912,13 @@ onMounted(() => {
           <!-- Mode A: Presets Dropdown -->
           <div v-if="routeInputMode === 'preset'" class="preset-section">
             <div class="field">
-              <label>选择常用分流规则模板 (Condition 下拉选择)</label>
+              <label>{{ t('config.preset_select_label') }}</label>
               <select
                 :value="selectedPresetId"
                 @change="applyPreset(($event.target as HTMLSelectElement).value)"
                 class="preset-select"
               >
-                <optgroup label="基础常用规则">
+                <optgroup :label="t('routing.tmpl_cat_common')">
                   <option
                     v-for="p in ROUTING_PRESETS.filter(x => x.category === 'common')"
                     :key="p.id"
@@ -1930,7 +1927,7 @@ onMounted(() => {
                     {{ p.name }} → {{ p.condition }}
                   </option>
                 </optgroup>
-                <optgroup label="安全与 DNS">
+                <optgroup :label="t('routing.tmpl_cat_security')">
                   <option
                     v-for="p in ROUTING_PRESETS.filter(x => x.category === 'security')"
                     :key="p.id"
@@ -1939,7 +1936,7 @@ onMounted(() => {
                     {{ p.name }} → {{ p.condition }}
                   </option>
                 </optgroup>
-                <optgroup label="境外服务与流媒体">
+                <optgroup :label="t('routing.tmpl_cat_media')">
                   <option
                     v-for="p in ROUTING_PRESETS.filter(x => x.category === 'media')"
                     :key="p.id"
@@ -1948,7 +1945,7 @@ onMounted(() => {
                     {{ p.name }} → {{ p.condition }}
                   </option>
                 </optgroup>
-                <optgroup label="开发者与 AI 工具">
+                <optgroup :label="t('routing.tmpl_cat_dev')">
                   <option
                     v-for="p in ROUTING_PRESETS.filter(x => x.category === 'dev')"
                     :key="p.id"
@@ -1957,7 +1954,7 @@ onMounted(() => {
                     {{ p.name }} → {{ p.condition }}
                   </option>
                 </optgroup>
-                <optgroup label="高级与协议端口">
+                <optgroup :label="t('routing.tmpl_cat_advanced')">
                   <option
                     v-for="p in ROUTING_PRESETS.filter(x => x.category === 'advanced')"
                     :key="p.id"
@@ -1991,13 +1988,13 @@ onMounted(() => {
                 class="builder-row"
               >
                 <!-- Negate check -->
-                <label class="builder-not-check" title="取反当前条件 (!)">
+                <label class="builder-not-check" :title="t('routing.builder_not')">
                   <input
                     type="checkbox"
                     v-model="item.not"
                     @change="updateConditionFromBuilder"
                   />
-                  <span>! 非</span>
+                  <span>{{ t('routing.builder_not') }}</span>
                 </label>
 
                 <!-- Type select -->
@@ -2006,15 +2003,15 @@ onMounted(() => {
                   class="builder-type-select"
                   @change="updateConditionFromBuilder"
                 >
-                  <option value="domain">domain 域名匹配</option>
-                  <option value="dip">dip 目标 IP 匹配</option>
-                  <option value="dport">dport 目标端口</option>
-                  <option value="sip">sip 客户端源 IP</option>
-                  <option value="sport">sport 源端口</option>
-                  <option value="l4proto">l4proto 传输协议</option>
-                  <option value="ipversion">ipversion IP 版本</option>
-                  <option value="pname">pname 进程名称</option>
-                  <option value="mac">mac 客户端物理地址</option>
+                  <option value="domain">{{ t('routing.type_domain') }}</option>
+                  <option value="dip">{{ t('routing.type_dip') }}</option>
+                  <option value="dport">{{ t('routing.type_dport') }}</option>
+                  <option value="sip">{{ t('routing.type_sip') }}</option>
+                  <option value="sport">{{ t('routing.type_sport') }}</option>
+                  <option value="l4proto">{{ t('routing.type_l4proto') }}</option>
+                  <option value="ipversion">{{ t('routing.type_ipver_opt') }}</option>
+                  <option value="pname">{{ t('routing.type_pname') }}</option>
+                  <option value="mac">{{ t('routing.type_mac') }}</option>
                 </select>
 
                 <!-- Domain modifiers -->
@@ -2024,12 +2021,12 @@ onMounted(() => {
                   class="builder-mod-select"
                   @change="updateConditionFromBuilder"
                 >
-                  <option value="geosite">预置规则库 (推荐)</option>
-                  <option value="suffix">域名后缀</option>
-                  <option value="keyword">包含关键字</option>
-                  <option value="full">精准全域名</option>
-                  <option value="regex">正则表达式</option>
-                  <option value="none">默认泛域名</option>
+                  <option value="geosite">{{ t('routing.sub_geosite_opt') }}</option>
+                  <option value="suffix">{{ t('routing.sub_suffix_opt') }}</option>
+                  <option value="keyword">{{ t('routing.sub_keyword_opt') }}</option>
+                  <option value="full">{{ t('routing.sub_full_opt') }}</option>
+                  <option value="regex">{{ t('routing.sub_regex_opt') }}</option>
+                  <option value="none">{{ t('routing.sub_domain_default_opt') }}</option>
                 </select>
 
                 <!-- Dip modifiers -->
@@ -2039,8 +2036,8 @@ onMounted(() => {
                   class="builder-mod-select"
                   @change="updateConditionFromBuilder"
                 >
-                  <option value="geoip">geoip 规则库 (如 cn, private)</option>
-                  <option value="none">单 IP 或 CIDR 网段</option>
+                  <option value="geoip">{{ t('routing.sub_geoip_opt') }}</option>
+                  <option value="none">{{ t('routing.sub_ip_cidr_opt') }}</option>
                 </select>
 
                 <!-- Parameter input -->
@@ -2050,13 +2047,12 @@ onMounted(() => {
                     v-model="item.value"
                     @input="updateConditionFromBuilder"
                     :placeholder="
-                      item.type === 'domain' ? (item.modifier === 'geosite' ? '如: cn 或 google,youtube' : '如: google.com') :
-                      item.type === 'dip' ? (item.modifier === 'geoip' ? '如: private 或 cn' : '如: 192.168.1.0/24') :
-                      item.type === 'dport' ? '如: 80, 443 或 53' :
-                      item.type === 'l4proto' ? 'tcp 或 udp' :
-                      item.type === 'ipversion' ? '4 或 6' :
-                      item.type === 'pname' ? '如: curl 或 chrome' :
-                      item.type === 'mac' ? '如: 00:11:22:33:44:55' : '输入参数值'
+                      item.type === 'domain' ? (item.modifier === 'geosite' ? t('routing.ph_domain_geosite') : t('routing.ph_domain_suffix')) :
+                      item.type === 'dip' ? (item.modifier === 'geoip' ? t('routing.ph_dip_geoip') : t('routing.ph_dip_cidr')) :
+                      item.type === 'dport' ? t('routing.ph_dport') :
+                      item.type === 'sip' ? t('routing.ph_sip') :
+                      item.type === 'pname' ? t('routing.ph_pname') :
+                      item.type === 'mac' ? t('routing.ph_mac') : '...'
                     "
                     class="builder-val-input"
                   />
@@ -2087,7 +2083,7 @@ onMounted(() => {
                   class="btn-icon delete"
                   :disabled="builderItems.length <= 1"
                   @click="removeBuilderItem(bIdx)"
-                  title="删除此子条件"
+                  :title="t('routing.btn_del_condition')"
                 >
                   <Trash2 :size="13" />
                 </button>
@@ -2098,7 +2094,7 @@ onMounted(() => {
                 class="btn btn-secondary btn-sm btn-add-cond"
                 @click="addBuilderItem"
               >
-                <Plus :size="12" /> 添加组合条件 (使用 && 连接)
+                <Plus :size="12" /> {{ t('routing.builder_btn_add_and') }}
               </button>
             </div>
           </div>
@@ -2106,61 +2102,61 @@ onMounted(() => {
           <!-- Mode C: Custom Raw Code -->
           <div v-else class="custom-section">
             <div class="field">
-              <label>手写匹配条件表达式 (dae Condition 语法)</label>
+              <label>{{ t('routing.custom_expr_label') }}</label>
               <input
                 v-model="editingRoute.condition"
-                placeholder="例如: domain(geosite:google) 或 dip(geoip:cn) 或 fallback"
+                :placeholder="t('routing.custom_expr_ph')"
                 class="mono-input"
               />
-              <span class="help-text">支持使用 && 逻辑与、! 逻辑非，以及 domain, dip, dport, l4proto, pname, sip, mac, fallback 等</span>
+              <span class="help-text">{{ t('routing.custom_expr_hint') }}</span>
             </div>
           </div>
 
           <!-- Live dae syntax preview -->
           <div class="syntax-preview-box">
-            <span class="preview-label">实时生成的 dae 规则语句:</span>
+            <span class="preview-label">{{ t('routing.stmt_title') }}:</span>
             <code class="preview-code">
-              {{ editingRoute.condition.trim() === 'fallback' ? `fallback: ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '<目标出口>') : editingRoute.target}` : `${editingRoute.condition || '<匹配条件>'} -> ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '<目标出口>') : editingRoute.target}` }}
+              {{ editingRoute.condition.trim() === 'fallback' ? `fallback: ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '<target>') : editingRoute.target}` : `${editingRoute.condition || '<condition>'} -> ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '<target>') : editingRoute.target}` }}
             </code>
           </div>
 
           <!-- Target Selection -->
           <div class="field">
-            <label>动作出口</label>
+            <label>{{ t('routing.target_action_label') }}</label>
             <select v-model="editingRoute.target" class="target-select">
-              <optgroup label="内置直连与阻断动作">
-                <option value="direct">direct (直接放行 / 默认直连)</option>
-                <option value="must_direct">must_direct (强制直连 / 避开本地 DNS 劫持)</option>
-                <option value="block">block (阻断连接 / 丢弃数据包)</option>
+              <optgroup :label="t('routing.optgroup_builtin')">
+                <option value="direct">{{ t('routing.target_opt_direct') }}</option>
+                <option value="must_direct">{{ t('routing.target_opt_must_direct') }}</option>
+                <option value="block">{{ t('routing.target_opt_block') }}</option>
               </optgroup>
-              <optgroup label="出站策略组">
+              <optgroup :label="t('routing.optgroup_groups')">
                 <option v-for="g in configModel.groups" :key="g.name" :value="g.name">
-                  {{ g.name }} (出站组策略: {{ g.policy }})
+                  {{ g.name }} ({{ t('routing.group_policy_prefix') }}: {{ g.policy }})
                 </option>
               </optgroup>
-              <optgroup label="高级与自定义">
-                <option value="__custom__">自定义策略组或动作名...</option>
+              <optgroup :label="t('routing.optgroup_advanced')">
+                <option value="__custom__">{{ t('routing.target_opt_custom') }}</option>
               </optgroup>
             </select>
           </div>
 
           <div v-if="editingRoute.target === '__custom__'" class="field">
-            <label>输入自定义目标出口名称</label>
-            <input v-model="editingRoute.customTarget" placeholder="输入合法的组名或动作" />
+            <label>{{ t('routing.custom_target_label') }}</label>
+            <input v-model="editingRoute.customTarget" :placeholder="t('routing.custom_target_ph')" />
           </div>
 
           <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showRouteModal = false">取消</button>
-            <button class="btn btn-primary" @click="saveRouteModal">确定保存分流规则</button>
+            <button class="btn btn-secondary" @click="showRouteModal = false">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" @click="saveRouteModal">{{ t('routing.btn_save_rule') }}</button>
           </div>
         </div>
 
         <!-- Tab 2: Syntax Guide & Examples -->
         <div v-else class="modal-body guide-modal">
           <div class="guide-banner">
-            <div class="banner-title"><BookOpen :size="15" /> dae 官方分流规则语法与核心机制说明</div>
+            <div class="banner-title"><BookOpen :size="15" /> {{ t('routing.guide_title') }}</div>
             <p>
-              dae 遵循自上而下的<strong>「首条命中立即终止」(First-Match-Wins)</strong> 原则。匹配条件由一个或多个 Matcher 组成，可用 <code>&amp;&amp;</code> 连接，并支持在条件前使用 <code>!</code> 取反。
+              {{ t('routing.guide_desc') }}
             </p>
           </div>
 
@@ -2176,7 +2172,7 @@ onMounted(() => {
               </div>
               <p class="syntax-summary">{{ sec.summary }}</p>
               <div class="syntax-examples-wrap">
-                <span class="ex-lbl">实用范例：</span>
+                <span class="ex-lbl">{{ t('routing.fast_tags_hint') }}:</span>
                 <div
                   v-for="(ex, eIdx) in sec.examples"
                   :key="eIdx"
@@ -2187,9 +2183,9 @@ onMounted(() => {
                   <button
                     class="btn-text-xs"
                     @click="applyExampleToRoute(ex)"
-                    title="将此示例表达式填入当前编辑规则"
+                    :title="t('routing.guide_apply_tip')"
                   >
-                    <Copy :size="10" /> 填入表单
+                    <Copy :size="10" /> {{ t('routing.guide_btn_apply') }}
                   </button>
                 </div>
               </div>
@@ -2197,7 +2193,7 @@ onMounted(() => {
           </div>
 
           <div class="modal-actions">
-            <button class="btn btn-primary" @click="routeModalTab = 'form'">返回规则参数配置</button>
+            <button class="btn btn-primary" @click="routeModalTab = 'form'">{{ t('common.back') }}</button>
           </div>
         </div>
       </div>
@@ -2207,21 +2203,21 @@ onMounted(() => {
     <div v-if="showSubModal" class="modal-backdrop" @click.self="showSubModal = false">
       <div class="modal-card">
         <div class="modal-header">
-          <h3>新增订阅</h3>
+          <h3>{{ t('config.new_sub') }}</h3>
           <button class="close-btn" @click="showSubModal = false">&times;</button>
         </div>
         <div class="modal-body form-modal">
           <div class="field">
-            <label>订阅标识 Tag (如 sub_a)</label>
-            <input v-model="editingSub.tag" placeholder="sub_tag" />
+            <label>{{ t('config.field.sub_tag') }}</label>
+            <input v-model="editingSub.tag" :placeholder="t('config.field.sub_tag_ph')" />
           </div>
           <div class="field">
-            <label>订阅 URL</label>
-            <input v-model="editingSub.url" placeholder="https://example.com/subscribe" />
+            <label>{{ t('config.field.sub_url') }}</label>
+            <input v-model="editingSub.url" :placeholder="t('config.field.sub_url_ph')" />
           </div>
           <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showSubModal = false">取消</button>
-            <button class="btn btn-primary" @click="saveSubModal">保存</button>
+            <button class="btn btn-secondary" @click="showSubModal = false">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" @click="saveSubModal">{{ t('common.save') }}</button>
           </div>
         </div>
       </div>
@@ -2231,7 +2227,7 @@ onMounted(() => {
     <div v-if="showBackupModal" class="modal-backdrop" @click.self="showBackupModal = false">
       <div class="modal-card">
         <div class="modal-header">
-          <h3><Archive class="icon" :size="18" /> 配置文件版本备份</h3>
+          <h3><Archive class="icon" :size="18" /> {{ t('config.backup_modal_title') }}</h3>
           <button class="close-btn" @click="showBackupModal = false">&times;</button>
         </div>
         <div class="modal-body">
@@ -2239,21 +2235,21 @@ onMounted(() => {
             <input
               type="text"
               v-model="newBackupLabel"
-              placeholder="备份备注标签 (例如: 改动前备份, v1.2)"
+              :placeholder="t('config.backup_label_ph')"
               @keydown.enter="createManualBackup"
             />
-            <button class="btn btn-primary" @click="createManualBackup">创建立即备份</button>
+            <button class="btn btn-primary" @click="createManualBackup">{{ t('config.create_backup_btn') }}</button>
           </div>
 
           <div class="backup-list-box">
-            <div v-if="backups.length === 0" class="empty-state">暂无历史备份版本</div>
+            <div v-if="backups.length === 0" class="empty-state">{{ t('config.no_backups') }}</div>
             <table v-else class="backup-table">
               <thead>
                 <tr>
-                  <th>备份文件名</th>
-                  <th>时间</th>
-                  <th>大小</th>
-                  <th style="text-align: right">操作</th>
+                  <th>{{ t('config.backup_col_name') }}</th>
+                  <th>{{ t('config.backup_col_time') }}</th>
+                  <th>{{ t('config.backup_col_size') }}</th>
+                  <th style="text-align: right">{{ t('common.action') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -2280,22 +2276,22 @@ onMounted(() => {
     <div v-if="showNewProfileModal" class="modal-backdrop" @click.self="showNewProfileModal = false">
       <div class="modal-card">
         <div class="modal-header">
-          <h3><Files class="icon" :size="18" /> 新建配置文件方案</h3>
+          <h3><Files class="icon" :size="18" /> {{ t('config.new_profile_title') }}</h3>
           <button class="close-btn" @click="showNewProfileModal = false">&times;</button>
         </div>
         <div class="modal-body form-modal">
           <div class="field">
-            <label>配置文件名 (.dae)</label>
+            <label>{{ t('config.profile_name_label') }}</label>
             <input
               v-model="newProfileName"
-              placeholder="例如: config.gaming.dae"
+              :placeholder="t('config.profile_name_ph')"
               @keydown.enter="createNewProfile"
             />
-            <span class="field-hint">将基于当前正在编辑的配置内容作为模板克隆创建，创建后可在列表中切换、独立编辑并一键生效。</span>
+            <span class="field-hint">{{ t('config.new_profile_hint') }}</span>
           </div>
           <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showNewProfileModal = false">取消</button>
-            <button class="btn btn-primary" @click="createNewProfile">创建方案</button>
+            <button class="btn btn-secondary" @click="showNewProfileModal = false">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" @click="createNewProfile">{{ t('config.btn_create_profile') }}</button>
           </div>
         </div>
       </div>
@@ -2305,22 +2301,22 @@ onMounted(() => {
     <div v-if="showCopyProfileModal" class="modal-backdrop" @click.self="showCopyProfileModal = false">
       <div class="modal-card">
         <div class="modal-header">
-          <h3><Copy class="icon" :size="18" /> 复制当前配置文件并新建</h3>
+          <h3><Copy class="icon" :size="18" /> {{ t('config.copy_profile_title') }}</h3>
           <button class="close-btn" @click="showCopyProfileModal = false">&times;</button>
         </div>
         <div class="modal-body form-modal">
           <div class="field">
-            <label>新建配置文件名称 (.dae)</label>
+            <label>{{ t('config.copy_profile_label') }}</label>
             <input
               v-model="copyProfileName"
-              placeholder="例如: copy_of_config.dae"
+              :placeholder="t('config.copy_profile_ph')"
               @keydown.enter="copyCurrentProfile"
             />
-            <span class="field-hint">将完整复制当前文件 [{{ currentSelectedConfig }}] 的全部参数、节点与规则并新建独立方案。</span>
+            <span class="field-hint">{{ t('config.copy_profile_hint', { name: currentSelectedConfig }) }}</span>
           </div>
           <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showCopyProfileModal = false">取消</button>
-            <button class="btn btn-primary" @click="copyCurrentProfile">复制并新建</button>
+            <button class="btn btn-secondary" @click="showCopyProfileModal = false">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary" @click="copyCurrentProfile">{{ t('config.btn_copy_profile') }}</button>
           </div>
         </div>
       </div>
@@ -2330,24 +2326,24 @@ onMounted(() => {
     <div v-if="showSubNodesModal" class="modal-backdrop" @click.self="showSubNodesModal = false">
       <div class="modal-card modal-large">
         <div class="modal-header">
-          <h3><ListFilter class="icon" :size="18" /> 订阅节点列表 - [{{ currentSubTag }}]</h3>
+          <h3><ListFilter class="icon" :size="18" /> {{ t('config.sub_nodes_modal_title', { tag: currentSubTag }) }}</h3>
           <button class="close-btn" @click="showSubNodesModal = false">&times;</button>
         </div>
         <div class="modal-body sub-nodes-modal">
           <div v-if="fetchingSubNodes" class="sub-loading-box">
             <RefreshCw class="icon spin" :size="24" />
-            <span>正在读取并解析订阅节点列表中...</span>
+            <span>{{ t('config.sub_nodes_loading') }}</span>
           </div>
           <div v-else-if="subFetchedNodes.length === 0" class="empty-state">
-            未在该订阅中解析出任何有效代理节点链接
+            {{ t('config.sub_nodes_empty') }}
           </div>
           <div v-else class="sub-nodes-container">
             <div class="sub-nodes-toolbar">
               <div class="sub-summary">
-                共获取到 <strong>{{ subFetchedNodes.length }}</strong> 个节点，已选择 <strong>{{ selectedSubNodesCount }}</strong> 个
+                {{ t('config.sub_nodes_stats', { total: subFetchedNodes.length, selected: selectedSubNodesCount }) }}
               </div>
               <button class="btn-text" @click="toggleSelectAllSubNodes">
-                <CheckSquare :size="14" /> {{ selectAllSubNodes ? '取消全选' : '全选所有' }}
+                <CheckSquare :size="14" /> {{ selectAllSubNodes ? t('common.deselect_all') : t('common.select_all') }}
               </button>
             </div>
 
@@ -2356,10 +2352,10 @@ onMounted(() => {
                 <thead>
                   <tr>
                     <th style="width: 38px"></th>
-                    <th style="width: 80px">协议</th>
-                    <th>节点名称</th>
-                    <th>服务器地址</th>
-                    <th style="width: 90px">地区</th>
+                    <th style="width: 80px">{{ t('common.protocol') }}</th>
+                    <th>{{ t('common.node_name') }}</th>
+                    <th>{{ t('common.server_address') }}</th>
+                    <th style="width: 90px">{{ t('common.region') }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2390,14 +2386,14 @@ onMounted(() => {
             </div>
 
             <div class="modal-actions" style="margin-top: 14px">
-              <button class="btn btn-secondary" @click="showSubNodesModal = false">取消</button>
+              <button class="btn btn-secondary" @click="showSubNodesModal = false">{{ t('common.cancel') }}</button>
               <button
                 class="btn btn-primary"
                 :disabled="selectedSubNodesCount === 0"
                 @click="importSelectedSubNodes"
               >
                 <Plus :size="14" />
-                <span>导入所选 {{ selectedSubNodesCount }} 个节点到配置</span>
+                <span>{{ t('config.btn_import_selected_nodes', { count: selectedSubNodesCount }) }}</span>
               </button>
             </div>
           </div>

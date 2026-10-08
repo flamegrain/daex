@@ -49,7 +49,7 @@ interface SystemBackupItem {
 
 const userInfo = ref<WebUIUserInfo>({
   username: 'admin',
-  role: 'WebUI 管理员',
+  role: 'admin',
   updatedAt: ''
 })
 
@@ -103,17 +103,17 @@ async function handleSaveUser() {
   userMessage.value = null
 
   if (!oldPassword.value) {
-    userMessage.value = { type: 'error', text: '请输入原登录密码进行安全验证' }
+    userMessage.value = { type: 'error', text: t('settings.pwd_old_required') }
     return
   }
 
   if (newPassword.value && newPassword.value !== confirmPassword.value) {
-    userMessage.value = { type: 'error', text: '两次输入的新密码不一致' }
+    userMessage.value = { type: 'error', text: t('settings.pwd_mismatch') }
     return
   }
 
   if (newPassword.value && newPassword.value.length < 6) {
-    userMessage.value = { type: 'error', text: '新密码长度至少需要 6 个字符' }
+    userMessage.value = { type: 'error', text: t('settings.pwd_min_len') }
     return
   }
 
@@ -130,16 +130,16 @@ async function handleSaveUser() {
     })
     const data = await res.json()
     if (res.ok) {
-      userMessage.value = { type: 'success', text: data.message || 'WebUI 登录用户信息更新成功' }
+      userMessage.value = { type: 'success', text: data.message || t('settings.user_update_success') }
       oldPassword.value = ''
       newPassword.value = ''
       confirmPassword.value = ''
       await fetchUserInfo()
     } else {
-      userMessage.value = { type: 'error', text: data.error || '更新失败' }
+      userMessage.value = { type: 'error', text: data.error || t('settings.user_update_fail') }
     }
   } catch (e: any) {
-    userMessage.value = { type: 'error', text: '网络请求失败: ' + e.message }
+    userMessage.value = { type: 'error', text: t('settings.network_req_fail', { error: e.message }) }
   } finally {
     savingUser.value = false
   }
@@ -171,12 +171,12 @@ async function handleSaveBackupSettings() {
     })
     const data = await res.json()
     if (res.ok) {
-      backupSettingsMsg.value = { type: 'success', text: data.message || '配置文件自动备份策略已保存' }
+      backupSettingsMsg.value = { type: 'success', text: data.message || t('settings.backup_policy_saved') }
     } else {
-      backupSettingsMsg.value = { type: 'error', text: data.error || '保存失败' }
+      backupSettingsMsg.value = { type: 'error', text: data.error || t('settings.save_failed') }
     }
   } catch (e: any) {
-    backupSettingsMsg.value = { type: 'error', text: '请求失败: ' + e.message }
+    backupSettingsMsg.value = { type: 'error', text: t('settings.network_req_fail', { error: e.message }) }
   } finally {
     savingBackupSettings.value = false
   }
@@ -209,21 +209,21 @@ async function handleCreateSystemBackup() {
     })
     const data = await res.json()
     if (res.ok) {
-      backupActionMsg.value = { type: 'success', text: `系统备份创建成功：${data.file}` }
+      backupActionMsg.value = { type: 'success', text: t('settings.backup_create_success', { file: data.file }) }
       newBackupLabel.value = ''
       await fetchSystemBackups()
     } else {
-      backupActionMsg.value = { type: 'error', text: data.error || '备份创建失败' }
+      backupActionMsg.value = { type: 'error', text: data.error || t('settings.backup_create_fail') }
     }
   } catch (e: any) {
-    backupActionMsg.value = { type: 'error', text: '创建备份失败: ' + e.message }
+    backupActionMsg.value = { type: 'error', text: t('settings.backup_create_fail') + ': ' + e.message }
   } finally {
     creatingBackup.value = false
   }
 }
 
 async function handleRestoreBackup(name: string) {
-  if (!confirm(`确认要将当前系统配置恢复为备份 [${name}] 吗？\n当前未保存的配置改动将被覆盖。`)) {
+  if (!confirm(t('settings.confirm_restore_backup', { name }))) {
     return
   }
   try {
@@ -234,28 +234,28 @@ async function handleRestoreBackup(name: string) {
     })
     const data = await res.json()
     if (res.ok) {
-      alert(`恢复成功！\n${data.message || ''}`)
+      alert(t('settings.restore_success', { message: data.message || '' }))
       await fetchSystemBackups()
     } else {
-      alert(`恢复失败: ${data.error || ''}\n${data.details || ''}`)
+      alert(t('settings.restore_failed', { error: (data.error || '') + ' ' + (data.details || '') }))
     }
   } catch (e: any) {
-    alert('恢复网络请求失败: ' + e.message)
+    alert(t('settings.restore_failed', { error: e.message }))
   }
 }
 
 async function handleDeleteBackup(name: string) {
-  if (!confirm(`确认删除备份文件 [${name}] 吗？此操作无法撤销。`)) return
+  if (!confirm(t('settings.confirm_delete_backup', { name }))) return
   try {
     const res = await fetch(`/api/backups/${encodeURIComponent(name)}`, { method: 'DELETE' })
     if (res.ok) {
       await fetchSystemBackups()
     } else {
       const data = await res.json()
-      alert('删除失败: ' + (data.error || ''))
+      alert(t('settings.delete_failed', { error: data.error || '' }))
     }
   } catch (e: any) {
-    alert('删除请求失败: ' + e.message)
+    alert(t('settings.delete_failed', { error: e.message }))
   }
 }
 
@@ -297,7 +297,7 @@ onMounted(() => {
     <header class="settings-header">
       <div class="header-left">
         <h2>{{ t('settings.title') }}</h2>
-        <p class="subtitle">管理界面偏好、语言模式、配置文件自动备份与系统快照恢复</p>
+        <p class="subtitle">{{ t('settings.subtitle') }}</p>
       </div>
     </header>
 
@@ -307,7 +307,7 @@ onMounted(() => {
       <section class="settings-card">
         <div class="card-title">
           <Globe class="card-icon" :size="18" />
-          <h3>界面偏好与语言</h3>
+          <h3>{{ t('settings.pref_title') }}</h3>
         </div>
 
         <div class="form-grid">
@@ -332,7 +332,7 @@ onMounted(() => {
                 <span>{{ t('settings.theme.light') }}</span>
               </button>
             </div>
-            <span class="setting-desc">支持白天浅色与黑夜深色模式实时平滑切换</span>
+            <span class="setting-desc">{{ t('settings.theme_desc') }}</span>
           </div>
 
           <!-- Language Setting -->
@@ -348,7 +348,7 @@ onMounted(() => {
                 <option value="en-US">English</option>
               </select>
             </div>
-            <span class="setting-desc">切换整个管理面板的显示语言</span>
+            <span class="setting-desc">{{ t('settings.lang_desc') }}</span>
           </div>
         </div>
       </section>
@@ -364,22 +364,22 @@ onMounted(() => {
         <div class="notice-box">
           <Shield class="notice-icon" :size="18" />
           <div class="notice-text">
-            <strong>独立安全认证</strong>：{{ t('settings.user.notice') }}
+            <strong>{{ t('common.notice') }}</strong>: {{ t('settings.user.notice') }}
           </div>
         </div>
 
         <!-- Current User Info Badges -->
         <div class="user-meta-bar">
           <div class="meta-badge">
-            <span class="meta-label">当前账户</span>
+            <span class="meta-label">{{ t('settings.user.username') }}</span>
             <span class="meta-value bold">{{ userInfo.username }}</span>
           </div>
           <div class="meta-badge">
-            <span class="meta-label">角色权限</span>
+            <span class="meta-label">{{ t('settings.user.role') }}</span>
             <span class="meta-value role">{{ t('settings.user.role.admin') }}</span>
           </div>
           <div class="meta-badge">
-            <span class="meta-label">上次修改时间</span>
+            <span class="meta-label">{{ t('common.time') }}</span>
             <span class="meta-value">{{ formatDate(userInfo.updatedAt) }}</span>
           </div>
         </div>
@@ -388,11 +388,11 @@ onMounted(() => {
         <div class="user-form">
           <div class="form-row">
             <div class="form-field">
-              <label>修改 WebUI 用户名</label>
+              <label>{{ t('settings.edit_username') }}</label>
               <input
                 v-model="editUsername"
                 type="text"
-                placeholder="例如: admin"
+                :placeholder="t('settings.edit_username_ph')"
                 class="text-input"
               />
             </div>
@@ -401,7 +401,7 @@ onMounted(() => {
               <input
                 v-model="oldPassword"
                 type="password"
-                placeholder="验证原登录密码 (初始密码: admin123)"
+                :placeholder="t('settings.old_pwd_ph')"
                 class="text-input"
               />
             </div>
@@ -409,11 +409,11 @@ onMounted(() => {
 
           <div class="form-row">
             <div class="form-field">
-              <label>{{ t('settings.user.new_pwd') }} (留空则不修改密码)</label>
+              <label>{{ t('settings.user.new_pwd') }} {{ t('settings.new_pwd_note') }}</label>
               <input
                 v-model="newPassword"
                 type="password"
-                placeholder="新登录密码 (至少 6 位)"
+                :placeholder="t('settings.new_pwd_ph')"
                 class="text-input"
               />
             </div>
@@ -422,7 +422,7 @@ onMounted(() => {
               <input
                 v-model="confirmPassword"
                 type="password"
-                placeholder="再次输入新登录密码"
+                :placeholder="t('settings.confirm_pwd_ph')"
                 class="text-input"
               />
             </div>
@@ -447,7 +447,7 @@ onMounted(() => {
               @click="handleSaveUser"
             >
               <Save :size="15" />
-              <span>{{ savingUser ? '保存中...' : t('settings.user.save') }}</span>
+              <span>{{ savingUser ? t('settings.saving_user') : t('settings.save_user_btn') }}</span>
             </button>
           </div>
         </div>
@@ -457,15 +457,15 @@ onMounted(() => {
       <section class="settings-card">
         <div class="card-title">
           <Calendar class="card-icon" :size="18" />
-          <h3>配置文件自动备份策略</h3>
+          <h3>{{ t('settings.auto_backup_title') }}</h3>
         </div>
 
         <div class="auto-backup-form">
           <!-- Switch Item -->
           <div class="backup-switch-row">
             <div class="switch-info">
-              <span class="switch-title">定时自动备份配置文件</span>
-              <span class="switch-desc">系统将按设定的周期自动生成当前生效分流配置与核心参数快照</span>
+              <span class="switch-title">{{ t('settings.auto_backup_switch') }}</span>
+              <span class="switch-desc">{{ t('settings.auto_backup_desc') }}</span>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" v-model="autoBackup.enabled" />
@@ -475,38 +475,38 @@ onMounted(() => {
 
           <div v-if="autoBackup.enabled" class="backup-controls-grid">
             <div class="setting-item">
-              <label class="setting-label">备份执行周期</label>
+              <label class="setting-label">{{ t('settings.backup_frequency') }}</label>
               <select v-model="autoBackup.frequency" class="select-input">
-                <option value="daily">每天</option>
-                <option value="weekly">每周</option>
-                <option value="monthly">每月</option>
+                <option value="daily">{{ t('settings.freq_daily') }}</option>
+                <option value="weekly">{{ t('settings.freq_weekly') }}</option>
+                <option value="monthly">{{ t('settings.freq_monthly') }}</option>
               </select>
             </div>
 
             <!-- If weekly -->
             <div v-if="autoBackup.frequency === 'weekly'" class="setting-item">
-              <label class="setting-label">指定每周几执行</label>
+              <label class="setting-label">{{ t('settings.day_of_week') }}</label>
               <select v-model="autoBackup.dayOfWeek" class="select-input">
-                <option :value="1">周一</option>
-                <option :value="2">周二</option>
-                <option :value="3">周三</option>
-                <option :value="4">周四</option>
-                <option :value="5">周五</option>
-                <option :value="6">周六</option>
-                <option :value="7">周日</option>
+                <option :value="1">{{ t('settings.day_mon') }}</option>
+                <option :value="2">{{ t('settings.day_tue') }}</option>
+                <option :value="3">{{ t('settings.day_wed') }}</option>
+                <option :value="4">{{ t('settings.day_thu') }}</option>
+                <option :value="5">{{ t('settings.day_fri') }}</option>
+                <option :value="6">{{ t('settings.day_sat') }}</option>
+                <option :value="7">{{ t('settings.day_sun') }}</option>
               </select>
             </div>
 
             <!-- If monthly -->
             <div v-if="autoBackup.frequency === 'monthly'" class="setting-item">
-              <label class="setting-label">指定每月几号执行</label>
+              <label class="setting-label">{{ t('settings.day_of_month') }}</label>
               <select v-model="autoBackup.dayOfMonth" class="select-input">
-                <option v-for="d in 28" :key="d" :value="d">{{ d }} 号</option>
+                <option v-for="d in 28" :key="d" :value="d">{{ d }} {{ t('settings.day_suffix') }}</option>
               </select>
             </div>
 
             <div class="setting-item">
-              <label class="setting-label">固定执行时间</label>
+              <label class="setting-label">{{ t('settings.backup_time') }}</label>
               <input
                 v-model="autoBackup.time"
                 type="time"
@@ -515,12 +515,12 @@ onMounted(() => {
             </div>
 
             <div class="setting-item">
-              <label class="setting-label">历史备份保留份数</label>
+              <label class="setting-label">{{ t('settings.keep_count') }}</label>
               <select v-model="autoBackup.keepCount" class="select-input">
-                <option :value="7">保留最近 7 份</option>
-                <option :value="15">保留最近 15 份</option>
-                <option :value="30">保留最近 30 份</option>
-                <option :value="60">保留最近 60 份</option>
+                <option :value="7">{{ t('settings.keep_format', { count: 7 }) }}</option>
+                <option :value="15">{{ t('settings.keep_format', { count: 15 }) }}</option>
+                <option :value="30">{{ t('settings.keep_format', { count: 30 }) }}</option>
+                <option :value="60">{{ t('settings.keep_format', { count: 60 }) }}</option>
               </select>
             </div>
           </div>
@@ -544,7 +544,7 @@ onMounted(() => {
               @click="handleSaveBackupSettings"
             >
               <Save :size="15" />
-              <span>{{ savingBackupSettings ? '保存中...' : '保存自动备份策略' }}</span>
+              <span>{{ savingBackupSettings ? t('settings.saving_backup') : t('settings.save_auto_backup') }}</span>
             </button>
           </div>
         </div>
@@ -555,9 +555,9 @@ onMounted(() => {
         <div class="card-title justify-between">
           <div class="title-left">
             <FolderArchive class="card-icon" :size="18" />
-            <h3>dae 系统备份与恢复</h3>
+            <h3>{{ t('settings.system_backups_title') }}</h3>
           </div>
-          <span class="count-badge">历史备份共 {{ systemBackups.length }} 份</span>
+          <span class="count-badge">{{ t('settings.backups_count', { count: systemBackups.length }) }}</span>
         </div>
 
         <!-- Quick Instant Backup Bar -->
@@ -565,7 +565,7 @@ onMounted(() => {
           <input
             v-model="newBackupLabel"
             type="text"
-            placeholder="输入备份备注 (例如: 升级前全量快照、调整分流备份)"
+            :placeholder="t('settings.backup_ph')"
             class="text-input flex-1"
           />
           <button
@@ -574,7 +574,7 @@ onMounted(() => {
             @click="handleCreateSystemBackup"
           >
             <Plus :size="14" />
-            <span>{{ creatingBackup ? '正在备份...' : '立即创建系统备份' }}</span>
+            <span>{{ creatingBackup ? t('settings.creating_backup') : t('settings.create_backup_btn') }}</span>
           </button>
         </div>
 
@@ -592,16 +592,16 @@ onMounted(() => {
         <div class="backup-table-wrapper">
           <div v-if="systemBackups.length === 0" class="empty-backups">
             <Archive class="empty-icon" :size="36" />
-            <p>暂无系统备份文件，可点击上方「立即创建系统备份」快速生成。</p>
+            <p>{{ t('settings.empty_backups') }}</p>
           </div>
 
           <table v-else class="backup-table">
             <thead>
               <tr>
-                <th>备份文件名称</th>
-                <th style="width: 110px">文件大小</th>
-                <th style="width: 170px">备份生成时间</th>
-                <th style="width: 170px; text-align: right">操作</th>
+                <th>{{ t('settings.col_backup_name') }}</th>
+                <th style="width: 110px">{{ t('settings.col_backup_size') }}</th>
+                <th style="width: 170px">{{ t('settings.col_backup_time') }}</th>
+                <th style="width: 170px; text-align: right">{{ t('settings.col_backup_actions') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -618,21 +618,21 @@ onMounted(() => {
                   <button
                     class="btn-cell-action restore"
                     @click="handleRestoreBackup(b.name)"
-                    title="从该快照恢复系统配置"
+                    :title="t('settings.btn_restore')"
                   >
-                    <RotateCcw :size="13" /> 恢复
+                    <RotateCcw :size="13" /> {{ t('settings.btn_restore') }}
                   </button>
                   <button
                     class="btn-cell-action download"
                     @click="handleDownloadBackup(b.name)"
-                    title="下载备份到本地"
+                    :title="t('settings.btn_download')"
                   >
                     <Download :size="13" />
                   </button>
                   <button
                     class="btn-cell-action delete"
                     @click="handleDeleteBackup(b.name)"
-                    title="删除该备份文件"
+                    :title="t('settings.btn_delete')"
                   >
                     <Trash2 :size="13" />
                   </button>
@@ -647,25 +647,25 @@ onMounted(() => {
       <section class="settings-card">
         <div class="card-title">
           <Info class="card-icon" :size="18" />
-          <h3>关于与系统信息</h3>
+          <h3>{{ t('settings.about.title') }}</h3>
         </div>
 
         <div class="about-grid">
           <div class="about-item">
-            <span class="about-label">项目组件</span>
-            <span class="about-value">dae 控制台可视化网关面板</span>
+            <span class="about-label">{{ t('settings.about.comp_label') }}</span>
+            <span class="about-value">{{ t('settings.about.comp_value') }}</span>
           </div>
           <div class="about-item">
-            <span class="about-label">内核底层技术</span>
-            <span class="about-value">Linux eBPF 透明网络路由核心</span>
+            <span class="about-label">{{ t('settings.about.kernel_label') }}</span>
+            <span class="about-value">{{ t('settings.about.kernel_value') }}</span>
           </div>
           <div class="about-item">
-            <span class="about-label">系统架构</span>
-            <span class="about-value">Go 静态单二进制 + 内嵌 Vue3 单页系统</span>
+            <span class="about-label">{{ t('settings.about.arch_label') }}</span>
+            <span class="about-value">{{ t('settings.about.arch_value') }}</span>
           </div>
           <div class="about-item">
-            <span class="about-label">配置与语法规则</span>
-            <span class="about-value">dae 规范语法与 0600 安全权限控制</span>
+            <span class="about-label">{{ t('settings.about.rules_label') }}</span>
+            <span class="about-value">{{ t('settings.about.rules_value') }}</span>
           </div>
         </div>
       </section>

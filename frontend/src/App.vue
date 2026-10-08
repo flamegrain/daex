@@ -165,16 +165,12 @@ onMounted(() => {
 
           <div class="status-meta">
             <div class="meta-row">
-              <span>PID:</span>
-              <span>{{ daeStatus?.MainPID || '-' }}</span>
-            </div>
-            <div class="meta-row">
-              <span>版本:</span>
+              <span>{{ t('status.version') }}:</span>
               <span class="version-tag">{{ daeStatus?.version?.split(' ')[2] || 'v2.x' }}</span>
             </div>
             <div class="meta-row">
-              <span>环境:</span>
-              <span class="mock-tag">安全假数据</span>
+              <span>{{ t('status.env') }}:</span>
+              <span class="mock-tag">{{ t('status.env.mock') }}</span>
             </div>
           </div>
 
@@ -182,10 +178,10 @@ onMounted(() => {
             class="refresh-btn"
             :disabled="loadingStatus"
             @click="refreshDaeStatus"
-            title="刷新服务状态"
+            :title="t('status.refresh')"
           >
             <RefreshCw class="icon" :size="12" :class="{ spin: loadingStatus }" />
-            <span>刷新状态</span>
+            <span>{{ loadingStatus ? t('status.refreshing') : t('status.refresh') }}</span>
           </button>
         </div>
       </div>
@@ -202,7 +198,7 @@ onMounted(() => {
 
       <div v-else-if="activeTab === 'service'" class="placeholder-view">
         <Activity :size="48" class="ph-icon" />
-        <h3>系统服务与内核调试</h3>
+        <h3>{{ t('nav.service') }}</h3>
         <div class="raw-status-box">
           <pre>{{ JSON.stringify({ daeStatus, backendHealth }, null, 2) }}</pre>
         </div>

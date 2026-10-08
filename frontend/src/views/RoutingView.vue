@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { t } from '../composables/useSettings'
 import {
   GitFork,
   Plus,
@@ -220,7 +221,7 @@ async function loadConfig(profileName?: string) {
     }
     await fetchConfigProfiles()
   } catch (e: any) {
-    alert('加载分流规则失败: ' + e.message)
+    alert(t('routing.load_failed', { error: e.message }))
   } finally {
     loading.value = false
   }
@@ -255,7 +256,7 @@ async function syncModelToBackend() {
 }
 
 async function activateCurrentConfig() {
-  if (!confirm(`确认使配置文件 [${currentSelectedConfig.value}] 生效到主 dae 服务吗？\n生效后系统将自动重载网络分流规则。`)) {
+  if (!confirm(t('routing.confirm_activate', { name: currentSelectedConfig.value }))) {
     return
   }
   activatingConfig.value = true
@@ -267,11 +268,11 @@ async function activateCurrentConfig() {
     })
     const data = await res.json()
     if (res.ok) {
-      alert(`生效成功！\n${data.message || ''}`)
+      alert(t('routing.activate_success', { message: data.message || '' }))
       await fetchConfigProfiles()
       await loadConfig(currentSelectedConfig.value)
     } else {
-      alert('生效失败: ' + (data.error || ''))
+      alert(t('routing.activate_failed', { error: data.error || '' }))
     }
   } finally {
     activatingConfig.value = false
@@ -302,13 +303,13 @@ async function updateRoutingTemplatesFromAPI() {
     const res = await fetch('/api/routing/templates/update', { method: 'POST' })
     const data = await res.json()
     if (res.ok && data.success) {
-      alert(`分流规则预设模板库更新成功！\n${data.message || ''}`)
+      alert(t('routing.tmpl_sync_success', { message: data.message || '' }))
       await loadRoutingTemplatesFromAPI()
     } else {
-      alert('更新模板失败: ' + (data.message || '未知错误'))
+      alert(t('routing.tmpl_sync_failed', { error: data.message || 'Error' }))
     }
   } catch (e: any) {
-    alert('更新模板请求失败: ' + e.message)
+    alert(t('routing.tmpl_sync_failed', { error: e.message }))
   } finally {
     templatesUpdating.value = false
   }
@@ -328,6 +329,20 @@ function removeBuilderItem(idx: number) {
   if (builderItems.value.length > 1) {
     builderItems.value.splice(idx, 1)
   }
+}
+
+function getBuilderPlaceholder(item: HumanizedConditionItem): string {
+  if (item.targetType === 'domain') {
+    return item.subType === 'geosite' ? t('routing.ph_domain_geosite') : t('routing.ph_domain_suffix')
+  }
+  if (item.targetType === 'dip') {
+    return item.subType === 'geoip' ? t('routing.ph_dip_geoip') : t('routing.ph_dip_cidr')
+  }
+  if (item.targetType === 'dport') return t('routing.ph_dport')
+  if (item.targetType === 'sip') return t('routing.ph_sip')
+  if (item.targetType === 'mac') return t('routing.ph_mac')
+  if (item.targetType === 'pname') return t('routing.ph_pname')
+  return '...'
 }
 
 function assembleConditionFromHumanizedBuilder(): string {
@@ -466,7 +481,7 @@ async function saveRuleFromEditor() {
   }
 
   if (!cond || !finalTarget) {
-    alert('分流匹配条件与动作出口不能为空')
+    alert(t('routing.condition_target_required'))
     return
   }
 
@@ -490,10 +505,10 @@ async function saveRuleFromEditor() {
   // Update live statement at the bottom
   if (cond === 'fallback') {
     lastGeneratedRuleStatement.value = `fallback: ${finalTarget}`
-    lastGeneratedExplain.value = `所有未命中上方规则的剩余网络流量，兜底导向 [${finalTarget}] 出口。`
+    lastGeneratedExplain.value = t('routing.explain_fallback', { target: finalTarget })
   } else {
     lastGeneratedRuleStatement.value = `${cond} -> ${finalTarget}`
-    lastGeneratedExplain.value = `当网络流量符合上述条件判定时，立即导向 [${finalTarget}] 动作出口并终止后续规则判定。`
+    lastGeneratedExplain.value = t('routing.explain_match', { target: finalTarget })
   }
 
   isEditorOpen.value = false
@@ -501,7 +516,7 @@ async function saveRuleFromEditor() {
 }
 
 function deleteRule(idx: number) {
-  if (!confirm(`确认删除第 ${idx + 1} 条分流规则？`)) return
+  if (!confirm(t('routing.confirm_delete_rule', { index: idx + 1 }))) return
   configModel.value.routingRules.splice(idx, 1)
   syncModelToBackend()
 }
@@ -618,8 +633,8 @@ onMounted(async () => {
         <div class="page-title-badge">
           <GitFork class="title-icon" :size="20" />
           <div>
-            <h2>分流与路由规则管理</h2>
-            <span class="subtext">内核流量特征精准匹配与逐条优先匹配规则出口判定</span>
+            <h2>{{ t('routing.page_title') }}</h2>
+            <span class="subtext">{{ t('routing.page_subtitle') }}</span>
           </div>
         </div>
 
@@ -630,7 +645,7 @@ onMounted(async () => {
             :value="currentSelectedConfig"
             @change="loadConfig(($event.target as HTMLSelectElement).value)"
             class="profile-select"
-            title="选择要配置的分流方案"
+            :title="t('routing.select_profile_tip')"
           >
             <option v-if="configProfiles.length === 0" :value="currentSelectedConfig">
               {{ currentSelectedConfig }}
@@ -640,26 +655,26 @@ onMounted(async () => {
               :key="p.name"
               :value="p.name"
             >
-              {{ p.name }} {{ (p.isActive || p.name === activeRunningConfig) ? ' [正在生效]' : '' }}
+              {{ p.name }} {{ (p.isActive || p.name === activeRunningConfig) ? ` [${t('common.active')}]` : '' }}
             </option>
           </select>
 
           <span
             v-if="currentSelectedConfig === activeRunningConfig"
             class="badge-active"
-            title="该配置文件正在作为主运行服务生效"
+            :title="t('routing.active_profile_hint')"
           >
-            <span class="active-dot"></span>已生效
+            <span class="active-dot"></span>{{ t('common.active') }}
           </span>
           <button
             v-else
             class="btn btn-sm btn-activate"
             :disabled="activatingConfig"
             @click="activateCurrentConfig"
-            title="将当前分流方案应用并热生效到系统"
+            :title="t('routing.activate_btn_tip')"
           >
             <Check :size="12" />
-            <span>{{ activatingConfig ? '生效中...' : '一键生效' }}</span>
+            <span>{{ activatingConfig ? t('common.activating') : t('routing.btn_activate') }}</span>
           </button>
         </div>
       </div>
@@ -673,7 +688,7 @@ onMounted(async () => {
             @click="activeTab = 'rules'"
           >
             <GitFork :size="14" />
-            <span>分流规则列表 ({{ configModel.routingRules.length }})</span>
+            <span>{{ t('routing.tab_rules') }} ({{ configModel.routingRules.length }})</span>
           </button>
           <button
             class="tab-btn"
@@ -681,7 +696,7 @@ onMounted(async () => {
             @click="activeTab = 'templates'"
           >
             <Sparkles :size="14" />
-            <span>预设模板库 ({{ routingTemplates.length }})</span>
+            <span>{{ t('routing.tab_templates') }} ({{ routingTemplates.length }})</span>
           </button>
           <button
             class="tab-btn"
@@ -689,7 +704,7 @@ onMounted(async () => {
             @click="activeTab = 'guide'"
           >
             <BookOpen :size="14" />
-            <span>官方语法指南</span>
+            <span>{{ t('routing.tab_guide') }}</span>
           </button>
         </div>
 
@@ -697,9 +712,9 @@ onMounted(async () => {
           v-if="!isEditorOpen"
           class="btn btn-primary"
           @click="openAddRuleEditor"
-          title="新增一条分流规则"
+          :title="t('routing.btn_add_tip')"
         >
-          <Plus :size="14" /> 新增路由规则
+          <Plus :size="14" /> {{ t('routing.btn_add') }}
         </button>
       </div>
     </header>
@@ -718,8 +733,8 @@ onMounted(async () => {
           >
             <ShieldCheck class="banner-icon" :size="18" />
             <div class="banner-info">
-              <span class="title">分流规则完全健康 (共 {{ configModel.routingRules.length }} 条)</span>
-              <span class="desc">所有规则自上而下匹配，未检测到死规则遮蔽、重复规则或兜底顺序错误。</span>
+              <span class="title">{{ t('routing.health_ok_title', { count: configModel.routingRules.length }) }}</span>
+              <span class="desc">{{ t('routing.health_ok_desc') }}</span>
             </div>
           </div>
 
@@ -734,13 +749,13 @@ onMounted(async () => {
                 <AlertTriangle v-else class="status-icon warning" :size="18" />
                 <div>
                   <h4 class="head-title">
-                    规则冲突与健康自诊断报告
-                    <span class="head-pill">共 {{ routingHealthReport.conflicts.length }} 项提示</span>
+                    {{ t('routing.conflict_report_title') }}
+                    <span class="head-pill">{{ t('routing.conflict_items_count', { count: routingHealthReport.conflicts.length }) }}</span>
                   </h4>
-                  <span class="head-sub">dae 严格按照从上到下的顺序进行路由判定（First-Match-Wins）。检测到以下潜在遮蔽或网络问题：</span>
+                  <span class="head-sub">{{ t('routing.conflict_report_desc') }}</span>
                 </div>
               </div>
-              <button class="btn-icon-subtle" :title="showConflictDetails ? '收起' : '展开'">
+              <button class="btn-icon-subtle" :title="showConflictDetails ? t('common.collapse') : t('common.expand')">
                 <ChevronUp v-if="showConflictDetails" :size="16" />
                 <ChevronDown v-else :size="16" />
               </button>
@@ -755,17 +770,17 @@ onMounted(async () => {
               >
                 <div class="diag-item-head">
                   <span class="diag-tag" :class="c.severity">
-                    {{ c.severity === 'error' ? '错误 / 逻辑冲突' : (c.severity === 'warning' ? '警告 / 阴影死规则' : '最佳实践建议') }}
+                    {{ c.severity === 'error' ? t('routing.diag_error') : (c.severity === 'warning' ? t('routing.diag_warning') : t('routing.diag_suggestion')) }}
                   </span>
                   <strong class="diag-title">{{ c.title }}</strong>
                   <div v-if="c.ruleIndices.length > 0" class="diag-involved">
-                    <span>涉及行号:</span>
+                    <span>{{ t('routing.diag_involved_lines') }}:</span>
                     <button
                       v-for="idx in c.ruleIndices"
                       :key="idx"
                       class="rule-pill-btn"
                       @click="highlightRule(idx)"
-                      title="点击定位高亮该条规则"
+                      :title="t('routing.diag_highlight_tip')"
                     >
                       #{{ idx + 1 }}
                     </button>
@@ -777,7 +792,7 @@ onMounted(async () => {
                 <div class="diag-sugg-box">
                   <Lightbulb :size="14" class="sugg-icon" />
                   <div class="sugg-text">
-                    <strong>修改优化建议:</strong>
+                    <strong>{{ t('routing.diag_sugg_label') }}:</strong>
                     <span>{{ c.suggestion }}</span>
                   </div>
                   <div class="sugg-actions">
@@ -786,14 +801,14 @@ onMounted(async () => {
                       class="btn btn-sm btn-quick-fix"
                       @click="fixMissingPrivateBypass"
                     >
-                      <Wand2 :size="12" /> 一键在顶部插入私网直连
+                      <Wand2 :size="12" /> {{ t('routing.diag_fix_private') }}
                     </button>
                     <button
                       v-if="c.id === 'fallback-not-last'"
                       class="btn btn-sm btn-quick-fix"
                       @click="fixFallbackOrder"
                     >
-                      <Wand2 :size="12" /> 一键将 Fallback 移至末尾
+                      <Wand2 :size="12" /> {{ t('routing.diag_fix_fallback') }}
                     </button>
                   </div>
                 </div>
@@ -807,10 +822,10 @@ onMounted(async () => {
           <div class="editor-header">
             <div class="header-title">
               <Wand2 class="icon-accent" :size="18" />
-              <h3>{{ editorMode === 'add' ? '新增路由分流规则' : `编辑第 ${editingIndex + 1} 条分流规则` }}</h3>
-              <span class="editor-badge">{{ editorMode === 'add' ? '添加模式' : '编辑中' }}</span>
+              <h3>{{ editorMode === 'add' ? t('routing.editor_title_add') : t('routing.editor_title_edit_indexed', { index: editingIndex + 1 }) }}</h3>
+              <span class="editor-badge">{{ editorMode === 'add' ? t('routing.editor_badge_add') : t('routing.editor_badge_edit') }}</span>
             </div>
-            <button class="btn-icon-subtle" @click="isEditorOpen = false" title="收起编辑器">
+            <button class="btn-icon-subtle" @click="isEditorOpen = false" :title="t('routing.editor_collapse')">
               &times;
             </button>
           </div>
@@ -818,7 +833,7 @@ onMounted(async () => {
           <div class="editor-body">
             <!-- Mode Switcher -->
             <div class="builder-nav-bar">
-              <span class="nav-label">配置模式:</span>
+              <span class="nav-label">{{ t('routing.builder_mode_label') }}:</span>
               <div class="pill-switch">
                 <button
                   type="button"
@@ -827,7 +842,7 @@ onMounted(async () => {
                   @click="builderMode = 'builder'"
                 >
                   <Wand2 :size="13" />
-                  <span>🛠️ 人性化条件构造器 (推荐)</span>
+                  <span>🛠️ {{ t('routing.mode_builder') }}</span>
                 </button>
                 <button
                   type="button"
@@ -836,7 +851,7 @@ onMounted(async () => {
                   @click="builderMode = 'custom'"
                 >
                   <Code :size="13" />
-                  <span>✏️ 手写专家代码 (dae 表达式)</span>
+                  <span>✏️ {{ t('routing.mode_custom') }}</span>
                 </button>
               </div>
             </div>
@@ -852,59 +867,59 @@ onMounted(async () => {
                   <div class="block-top-row">
                     <!-- 1. Intent: Match vs Exclude -->
                     <div class="ctrl-group">
-                      <label class="ctrl-lbl">匹配方式:</label>
+                      <label class="ctrl-lbl">{{ t('routing.builder_intent_label') }}:</label>
                       <select v-model="item.intent" class="form-select intent-select">
-                        <option value="match">🟢 符合此条件 (匹配)</option>
-                        <option value="exclude">🔴 排除此条件 (取反)</option>
+                        <option value="match">{{ t('routing.intent_match_full') }}</option>
+                        <option value="exclude">{{ t('routing.intent_exclude_full') }}</option>
                       </select>
                     </div>
 
                     <!-- 2. Target Type -->
                     <div class="ctrl-group">
-                      <label class="ctrl-lbl">流量对象:</label>
+                      <label class="ctrl-lbl">{{ t('routing.builder_target_label') }}:</label>
                       <select v-model="item.targetType" class="form-select type-select">
-                        <option value="domain">🌐 网站域名</option>
-                        <option value="dip">🎯 目标 IP 与网段</option>
-                        <option value="dport">🔌 网络端口</option>
-                        <option value="sip">💻 客户端设备 IP</option>
-                        <option value="mac">🏷️ 客户端 MAC 地址</option>
-                        <option value="l4proto">⚡ 传输协议</option>
-                        <option value="ipversion">🔢 协议版本</option>
-                        <option value="pname">📦 进程名称</option>
+                        <option value="domain">{{ t('routing.type_domain_opt') }}</option>
+                        <option value="dip">{{ t('routing.type_dip_opt') }}</option>
+                        <option value="dport">{{ t('routing.type_dport_opt') }}</option>
+                        <option value="sip">{{ t('routing.type_sip_opt') }}</option>
+                        <option value="mac">{{ t('routing.type_mac_opt') }}</option>
+                        <option value="l4proto">{{ t('routing.type_l4proto_opt') }}</option>
+                        <option value="ipversion">{{ t('routing.type_ipver_opt') }}</option>
+                        <option value="pname">{{ t('routing.type_pname_opt') }}</option>
                       </select>
                     </div>
 
                     <!-- 3. Subtype modifiers -->
                     <div v-if="item.targetType === 'domain'" class="ctrl-group">
-                      <label class="ctrl-lbl">匹配范围:</label>
+                      <label class="ctrl-lbl">{{ t('routing.builder_scope_label') }}:</label>
                       <select v-model="item.subType" class="form-select">
-                        <option value="geosite">预置规则库 (geosite: 推荐)</option>
-                        <option value="suffix">域名后缀 (suffix:)</option>
-                        <option value="keyword">包含关键字 (keyword:)</option>
-                        <option value="full">精准全域名 (full:)</option>
-                        <option value="regex">正则表达式 (regex:)</option>
-                        <option value="none">默认泛域名</option>
+                        <option value="geosite">{{ t('routing.sub_geosite_opt') }}</option>
+                        <option value="suffix">{{ t('routing.sub_suffix_opt') }}</option>
+                        <option value="keyword">{{ t('routing.sub_keyword_opt') }}</option>
+                        <option value="full">{{ t('routing.sub_full_opt') }}</option>
+                        <option value="regex">{{ t('routing.sub_regex_opt') }}</option>
+                        <option value="none">{{ t('routing.sub_domain_default_opt') }}</option>
                       </select>
                     </div>
 
                     <div v-else-if="item.targetType === 'dip'" class="ctrl-group">
-                      <label class="ctrl-lbl">匹配方式:</label>
+                      <label class="ctrl-lbl">{{ t('routing.builder_sub_method') }}:</label>
                       <select v-model="item.subType" class="form-select">
-                        <option value="geoip">地理/私网规则库 (geoip: 如 cn, private)</option>
-                        <option value="none">指定 IP 地址或 CIDR 网段</option>
+                        <option value="geoip">{{ t('routing.sub_geoip_opt') }}</option>
+                        <option value="none">{{ t('routing.sub_ip_cidr_opt') }}</option>
                       </select>
                     </div>
 
                     <div v-else-if="item.targetType === 'l4proto'" class="ctrl-group">
-                      <label class="ctrl-lbl">协议类型:</label>
+                      <label class="ctrl-lbl">{{ t('routing.builder_proto_label') }}:</label>
                       <select v-model="item.value" class="form-select">
-                        <option value="tcp">TCP 传输连接</option>
-                        <option value="udp">UDP 数据报文</option>
+                        <option value="tcp">{{ t('routing.proto_tcp_opt') }}</option>
+                        <option value="udp">{{ t('routing.proto_udp_opt') }}</option>
                       </select>
                     </div>
 
                     <div v-else-if="item.targetType === 'ipversion'" class="ctrl-group">
-                      <label class="ctrl-lbl">协议版本:</label>
+                      <label class="ctrl-lbl">{{ t('routing.builder_ipver_label') }}:</label>
                       <select v-model="item.value" class="form-select">
                         <option value="4">IPv4</option>
                         <option value="6">IPv6</option>
@@ -917,7 +932,7 @@ onMounted(async () => {
                       class="btn-icon delete remove-block-btn"
                       :disabled="builderItems.length <= 1"
                       @click="removeBuilderItem(bIdx)"
-                      title="删除此项条件"
+                      :title="t('routing.btn_del_condition')"
                     >
                       <Trash2 :size="14" />
                     </button>
@@ -933,52 +948,45 @@ onMounted(async () => {
                         type="text"
                         v-model="item.value"
                         class="form-input val-input mono"
-                        :placeholder="
-                          item.targetType === 'domain' ? (item.subType === 'geosite' ? '输入或点击下方规则标签 (如: cn, google)' : '输入域名 (如: baidu.com)') :
-                          item.targetType === 'dip' ? (item.subType === 'geoip' ? '输入 geoip 标识 (如: private 或 cn)' : '如: 192.168.1.0/24 或 223.5.5.5') :
-                          item.targetType === 'dport' ? '输入端口号 (如: 80, 443 或 53 或 10000:20000)' :
-                          item.targetType === 'sip' ? '输入内网客户端 IP (如: 192.168.1.100)' :
-                          item.targetType === 'mac' ? '输入客户端 MAC (如: 00:11:22:33:44:55)' :
-                          item.targetType === 'pname' ? '输入本机进程名 (如: curl, chrome)' : '输入参数值'
-                        "
+                        :placeholder="getBuilderPlaceholder(item)"
                       />
                     </div>
 
                     <!-- Fast Clickable Tags -->
                     <div class="fast-tags-wrap">
-                      <span class="tags-hint">常用快捷选择:</span>
+                      <span class="tags-hint">{{ t('routing.fast_tags_hint') }}:</span>
                       <template v-if="item.targetType === 'domain' && item.subType === 'geosite'">
-                        <button type="button" class="tag-pill" @click="item.value = 'cn'">🇨🇳 cn (大陆网站)</button>
-                        <button type="button" class="tag-pill" @click="item.value = 'google'">Google 全系</button>
-                        <button type="button" class="tag-pill" @click="item.value = 'youtube'">YouTube 视频</button>
-                        <button type="button" class="tag-pill" @click="item.value = 'category-ads-all'">🚫 广告拦截</button>
-                        <button type="button" class="tag-pill" @click="item.value = 'github'">GitHub 开源</button>
-                        <button type="button" class="tag-pill" @click="item.value = 'netflix,disney'">流媒体服务</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'cn'">{{ t('routing.tag_cn_domain') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'google'">{{ t('routing.tag_google') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'youtube'">{{ t('routing.tag_youtube') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'category-ads-all'">{{ t('routing.tag_ads') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'github'">{{ t('routing.tag_github') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'netflix,disney'">{{ t('routing.tag_streaming') }}</button>
                       </template>
                       <template v-else-if="item.targetType === 'dip' && item.subType === 'geoip'">
-                        <button type="button" class="tag-pill" @click="item.value = 'private'">🔒 private (内网私网)</button>
-                        <button type="button" class="tag-pill" @click="item.value = 'cn'">🇨🇳 cn (大陆IP)</button>
-                        <button type="button" class="tag-pill" @click="item.value = 'us'">🇺🇸 us (美国IP)</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'private'">{{ t('routing.tag_private_ip') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'cn'">{{ t('routing.tag_cn_ip') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = 'us'">{{ t('routing.tag_us_ip') }}</button>
                       </template>
                       <template v-else-if="item.targetType === 'dport'">
-                        <button type="button" class="tag-pill" @click="item.value = '80, 443'">🌐 80, 443 (Web网页)</button>
-                        <button type="button" class="tag-pill" @click="item.value = '53'">🔍 53 (DNS解析)</button>
-                        <button type="button" class="tag-pill" @click="item.value = '22'">💻 22 (SSH运维)</button>
-                        <button type="button" class="tag-pill" @click="item.value = '6881:6889'">⚡ BT下载端口</button>
+                        <button type="button" class="tag-pill" @click="item.value = '80, 443'">{{ t('routing.tag_web_port') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = '53'">{{ t('routing.tag_dns_port') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = '22'">{{ t('routing.tag_ssh_port') }}</button>
+                        <button type="button" class="tag-pill" @click="item.value = '6881:6889'">{{ t('routing.tag_bt_port') }}</button>
                       </template>
                     </div>
                   </div>
 
                   <!-- "AND" connector indicator -->
                   <div v-if="bIdx < builderItems.length - 1" class="and-connector">
-                    <span class="and-badge">并且 (需同时满足)</span>
+                    <span class="and-badge">{{ t('routing.builder_and_badge') }}</span>
                   </div>
                 </div>
               </div>
 
               <div class="builder-bottom-actions">
                 <button type="button" class="btn btn-secondary btn-sm" @click="addBuilderItem">
-                  <Plus :size="13" /> 添加组合条件 (并且同时满足)
+                  <Plus :size="13" /> {{ t('routing.builder_btn_add_and') }}
                 </button>
               </div>
             </div>
@@ -986,57 +994,57 @@ onMounted(async () => {
             <!-- Custom Mode: Code Expression -->
             <div v-else class="custom-editor-box">
               <div class="form-group">
-                <label>手写匹配表达式 (Condition 语法)</label>
+                <label>{{ t('routing.custom_expr_label') }}</label>
                 <input
                   type="text"
                   v-model="editingRule.condition"
                   class="form-input mono"
-                  placeholder="例如: domain(geosite:cn) && dport(443) 或 fallback"
+                  :placeholder="t('routing.custom_expr_ph')"
                 />
-                <span class="field-hint">支持使用 && 组合条件，支持 domain, dip, dport, l4proto, pname, sip, mac 及 fallback</span>
+                <span class="field-hint">{{ t('routing.custom_expr_hint') }}</span>
               </div>
             </div>
 
             <!-- Target Selection Row -->
             <div class="target-select-row">
               <div class="form-group flex-1">
-                <label>动作出口</label>
+                <label>{{ t('routing.target_action_label') }}</label>
                 <select v-model="editingRule.target" class="form-select target-select">
-                  <optgroup label="内置直连与阻断动作">
-                    <option value="direct">direct (直接放行 / 常规直连)</option>
-                    <option value="must_direct">must_direct (强制直连 / 避开本地 DNS 劫持)</option>
-                    <option value="block">block (阻断连接 / 丢弃数据包)</option>
+                  <optgroup :label="t('routing.optgroup_builtin')">
+                    <option value="direct">{{ t('routing.target_opt_direct') }}</option>
+                    <option value="must_direct">{{ t('routing.target_opt_must_direct') }}</option>
+                    <option value="block">{{ t('routing.target_opt_block') }}</option>
                   </optgroup>
-                  <optgroup label="代理策略组">
+                  <optgroup :label="t('routing.optgroup_groups')">
                     <option v-for="g in configModel.groups" :key="g.name" :value="g.name">
-                      {{ g.name }} (出站策略: {{ g.policy }})
+                      {{ g.name }} ({{ t('routing.group_policy_prefix') }}: {{ g.policy }})
                     </option>
                   </optgroup>
-                  <optgroup label="高级">
-                    <option value="__custom__">自定义策略组或动作名...</option>
+                  <optgroup :label="t('routing.optgroup_advanced')">
+                    <option value="__custom__">{{ t('routing.target_opt_custom') }}</option>
                   </optgroup>
                 </select>
                 <span class="field-hint">
-                  提示：上游 DNS 解析强烈推荐使用 <code>must_direct</code> 避免形成递归回环；广告拦截使用 <code>block</code>。
+                  {{ t('routing.target_hint_dns') }}
                 </span>
               </div>
 
               <div v-if="editingRule.target === '__custom__'" class="form-group flex-1">
-                <label>输入自定义目标出口名称</label>
+                <label>{{ t('routing.custom_target_label') }}</label>
                 <input
                   type="text"
                   v-model="editingRule.customTarget"
                   class="form-input mono"
-                  placeholder="输入合法的组名"
+                  :placeholder="t('routing.custom_target_ph')"
                 />
               </div>
             </div>
 
             <!-- Editor Buttons -->
             <div class="editor-footer-actions">
-              <button class="btn btn-secondary" @click="isEditorOpen = false">取消</button>
+              <button class="btn btn-secondary" @click="isEditorOpen = false">{{ t('common.cancel') }}</button>
               <button class="btn btn-primary" @click="saveRuleFromEditor">
-                <Check :size="14" /> 确定保存分流规则
+                <Check :size="14" /> {{ t('routing.btn_save_rule') }}
               </button>
             </div>
           </div>
@@ -1046,23 +1054,23 @@ onMounted(async () => {
         <div class="rules-table-card">
           <div class="table-card-header">
             <div class="table-title">
-              <h3>规则列表执行顺序 (自上而下逐条匹配)</h3>
-              <span class="rules-count-pill">共 {{ configModel.routingRules.length }} 条规则</span>
+              <h3>{{ t('routing.table_title_order') }}</h3>
+              <span class="rules-count-pill">{{ t('routing.table_rules_count', { count: configModel.routingRules.length }) }}</span>
             </div>
 
             <div class="table-right-tools">
               <span class="text-muted table-tip">
-                <Info :size="13" /> 优先命中的特定细分规则应上移放置于上方
+                <Info :size="13" /> {{ t('routing.table_tip_priority') }}
               </span>
             </div>
           </div>
 
           <div v-if="configModel.routingRules.length === 0" class="empty-state-card">
             <GitFork class="empty-icon" :size="48" />
-            <h4>当前方案中暂无分流规则</h4>
-            <p>你可以点击上方「新增路由规则」，或者前往「预设模板库」一键套用常用场景。</p>
+            <h4>{{ t('routing.empty_title') }}</h4>
+            <p>{{ t('routing.empty_desc') }}</p>
             <button class="btn btn-primary btn-sm" @click="openAddRuleEditor">
-              <Plus :size="13" /> 立即新增分流规则
+              <Plus :size="13" /> {{ t('routing.btn_add_now') }}
             </button>
           </div>
 
@@ -1070,12 +1078,12 @@ onMounted(async () => {
             <table class="routing-table">
               <thead>
                 <tr>
-                  <th style="width: 44px; text-align: center" title="按住手柄上下拖动">拖动</th>
-                  <th style="width: 50px">序号</th>
-                  <th>匹配条件</th>
-                  <th style="width: 170px">动作出口</th>
-                  <th style="width: 130px">状态健康</th>
-                  <th style="width: 140px; text-align: right">操作</th>
+                  <th style="width: 44px; text-align: center" :title="t('routing.col_drag_tip')">{{ t('routing.col_drag') }}</th>
+                  <th style="width: 50px">{{ t('routing.col_order') }}</th>
+                  <th>{{ t('routing.col_condition') }}</th>
+                  <th style="width: 170px">{{ t('routing.col_target') }}</th>
+                  <th style="width: 130px">{{ t('routing.col_status') }}</th>
+                  <th style="width: 140px; text-align: right">{{ t('routing.col_action') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1102,21 +1110,21 @@ onMounted(async () => {
                     <div
                       v-if="idx === 0 && isPrivateBypassRule(rule)"
                       class="drag-handle-grip disabled"
-                      title="局域网私网直连（推荐首行置顶，固定不可拖动）"
+                      :title="t('routing.drag_tip_pinned')"
                     >
                       <GripVertical :size="16" />
                     </div>
                     <div
                       v-else-if="rule.condition === 'fallback'"
                       class="drag-handle-grip disabled"
-                      title="兜底规则固定于末尾，无法拖动"
+                      :title="t('routing.drag_tip_fallback')"
                     >
                       <GripVertical :size="16" />
                     </div>
                     <div
                       v-else
                       class="drag-handle-grip"
-                      title="按住鼠标拖拽自由上下调整优先级"
+                      :title="t('routing.drag_tip_movable')"
                     >
                       <GripVertical :size="16" />
                     </div>
@@ -1127,10 +1135,10 @@ onMounted(async () => {
                   <td class="cond-col mono">
                     <span v-if="idx === 0 && isPrivateBypassRule(rule)" class="pinned-rule-wrap">
                       <span class="rule-code-text">{{ rule.condition }}</span>
-                      <span class="pinned-badge">推荐置顶·私网直连</span>
+                      <span class="pinned-badge">{{ t('routing.badge_pinned_lan') }}</span>
                     </span>
                     <span v-else-if="rule.condition === 'fallback'" class="fallback-badge">
-                      兜底规则 (固定于末尾)
+                      {{ t('routing.badge_fallback') }}
                     </span>
                     <span v-else class="rule-code-text">{{ rule.condition }}</span>
                   </td>
@@ -1143,38 +1151,38 @@ onMounted(async () => {
                       class="health-tag danger"
                       :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
                     >
-                      <ShieldAlert :size="12" /> 严重冲突
+                      <ShieldAlert :size="12" /> {{ t('routing.status_conflict') }}
                     </span>
                     <span
                       v-else-if="routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'"
                       class="health-tag warning"
                       :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
                     >
-                      <AlertTriangle :size="12" /> 规则遮蔽
+                      <AlertTriangle :size="12" /> {{ t('routing.status_shadow') }}
                     </span>
                     <span v-else class="health-tag ok">
-                      <Check :size="12" /> 正常
+                      <Check :size="12" /> {{ t('routing.status_ok') }}
                     </span>
                   </td>
                   <td class="actions-col">
                     <button
                       class="btn-icon"
                       @click="duplicateRule(idx)"
-                      title="复制规则"
+                      :title="t('routing.btn_copy_rule')"
                     >
                       <Copy :size="13" />
                     </button>
                     <button
                       class="btn-icon"
                       @click="openEditRuleEditor(rule, idx)"
-                      title="编辑此规则"
+                      :title="t('routing.btn_edit_rule')"
                     >
                       <Edit2 :size="13" />
                     </button>
                     <button
                       class="btn-icon delete"
                       @click="deleteRule(idx)"
-                      title="删除规则"
+                      :title="t('routing.btn_del_rule')"
                     >
                       <Trash2 :size="13" />
                     </button>
@@ -1190,8 +1198,8 @@ onMounted(async () => {
           <div class="result-header">
             <CheckCircle2 class="text-success" :size="18" />
             <div>
-              <h4>最近生成的 dae 规则语句</h4>
-              <span class="subtext">这是完成配置操作后最终转换输出的精准 dae 规则代码</span>
+              <h4>{{ t('routing.stmt_title') }}</h4>
+              <span class="subtext">{{ t('routing.stmt_desc') }}</span>
             </div>
           </div>
           <div class="result-code-box">
@@ -1210,11 +1218,11 @@ onMounted(async () => {
           <div class="top-info">
             <div class="title-row">
               <Sparkles class="icon-accent" :size="20" />
-              <h3>分流规则预设模板库</h3>
-              <span class="ver-tag">版本: v{{ templateVersion }}</span>
+              <h3>{{ t('routing.tmpl_title') }}</h3>
+              <span class="ver-tag">{{ t('routing.tmpl_version', { version: templateVersion }) }}</span>
             </div>
             <p class="desc">
-              收录局域网放行、中国大陆直连、广告阻断、境外服务、AI工具等高频分流范式，支持一键载入编辑表单。
+              {{ t('routing.tmpl_desc') }}
             </p>
           </div>
 
@@ -1223,10 +1231,10 @@ onMounted(async () => {
               class="btn btn-secondary"
               :disabled="templatesUpdating"
               @click="updateRoutingTemplatesFromAPI"
-              title="从服务端拉取最新模板配置"
+              :title="t('routing.tmpl_sync_btn_tip')"
             >
               <RefreshCw :size="14" :class="{ spin: templatesUpdating }" />
-              <span>{{ templatesUpdating ? '正在同步...' : '检查与同步最新模板' }}</span>
+              <span>{{ templatesUpdating ? t('routing.tmpl_syncing') : t('routing.tmpl_btn_sync') }}</span>
             </button>
           </div>
         </div>
@@ -1238,7 +1246,7 @@ onMounted(async () => {
             <input
               type="text"
               v-model="templateSearchQuery"
-              placeholder="搜索预设模板名称、匹配条件或用途说明..."
+              :placeholder="t('routing.tmpl_search_ph')"
               class="search-input"
             />
           </div>
@@ -1249,42 +1257,42 @@ onMounted(async () => {
               :class="{ active: templateCategoryFilter === 'all' }"
               @click="templateCategoryFilter = 'all'"
             >
-              全部 ({{ routingTemplates.length }})
+              {{ t('routing.tmpl_cat_all') }} ({{ routingTemplates.length }})
             </button>
             <button
               class="cat-pill"
               :class="{ active: templateCategoryFilter === 'common' }"
               @click="templateCategoryFilter = 'common'"
             >
-              基础常用
+              {{ t('routing.tmpl_cat_common') }}
             </button>
             <button
               class="cat-pill"
               :class="{ active: templateCategoryFilter === 'security' }"
               @click="templateCategoryFilter = 'security'"
             >
-              安全与DNS
+              {{ t('routing.tmpl_cat_security') }}
             </button>
             <button
               class="cat-pill"
               :class="{ active: templateCategoryFilter === 'media' }"
               @click="templateCategoryFilter = 'media'"
             >
-              媒体与游戏
+              {{ t('routing.tmpl_cat_media') }}
             </button>
             <button
               class="cat-pill"
               :class="{ active: templateCategoryFilter === 'dev' }"
               @click="templateCategoryFilter = 'dev'"
             >
-              开发与AI
+              {{ t('routing.tmpl_cat_dev') }}
             </button>
             <button
               class="cat-pill"
               :class="{ active: templateCategoryFilter === 'advanced' }"
               @click="templateCategoryFilter = 'advanced'"
             >
-              高级端口
+              {{ t('routing.tmpl_cat_advanced') }}
             </button>
           </div>
         </div>
@@ -1300,7 +1308,7 @@ onMounted(async () => {
               <div class="tmpl-head-line">
                 <span class="tmpl-name">{{ tmpl.name }}</span>
                 <span class="tmpl-cat-badge">{{ tmpl.category }}</span>
-                <span class="tmpl-target-badge">推荐出口: {{ tmpl.recommendedTarget }}</span>
+                <span class="tmpl-target-badge">{{ t('routing.tmpl_recommended_target') }}: {{ tmpl.recommendedTarget }}</span>
               </div>
 
               <div class="tmpl-cond-line">
@@ -1322,7 +1330,7 @@ onMounted(async () => {
                 class="btn btn-primary btn-sm btn-apply"
                 @click="applyTemplateToEditor(tmpl)"
               >
-                <Plus :size="13" /> 填入并使用此模板
+                <Plus :size="13" /> {{ t('routing.tmpl_btn_apply') }}
               </button>
             </div>
           </div>
@@ -1337,10 +1345,10 @@ onMounted(async () => {
         <div class="guide-intro-banner">
           <div class="banner-title-line">
             <BookOpen class="icon-accent" :size="20" />
-            <h3>dae 官方分流规则语法与核心机制说明</h3>
+            <h3>{{ t('routing.guide_title') }}</h3>
           </div>
           <p class="banner-desc">
-            dae 基于 eBPF 在 Linux 内核层捕获网络流量，并遵循自上而下的<strong>「首条命中即终止」(First-Match-Wins)</strong> 原则。匹配条件由一个或多个 Matcher 构成，支持用 <code>&amp;&amp;</code> 组合与 <code>!</code> 取反。
+            {{ t('routing.guide_desc') }}
           </p>
         </div>
 
@@ -1378,9 +1386,9 @@ onMounted(async () => {
                   <button
                     class="btn btn-secondary btn-xs btn-use-ex"
                     @click="applyExampleToEditor(ex)"
-                    title="将此示例表达式填入主工作区编辑表单"
+                    :title="t('routing.guide_apply_tip')"
                   >
-                    <Plus :size="12" /> 填入表单
+                    <Plus :size="12" /> {{ t('routing.guide_btn_apply') }}
                   </button>
                 </div>
               </div>
