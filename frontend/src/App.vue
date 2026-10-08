@@ -20,6 +20,7 @@ import NodesView from './views/NodesView.vue'
 import UpdateView from './views/UpdateView.vue'
 import SettingsView from './views/SettingsView.vue'
 import LogsView from './views/LogsView.vue'
+import ServiceView from './views/ServiceView.vue'
 import { t, theme, applyTheme } from './composables/useSettings'
 
 type Tab = 'home' | 'config' | 'routing' | 'nodes' | 'logs' | 'service' | 'update' | 'settings'
@@ -195,15 +196,7 @@ onMounted(() => {
       <NodesView v-else-if="activeTab === 'nodes'" />
 
       <LogsView v-else-if="activeTab === 'logs'" />
-
-      <div v-else-if="activeTab === 'service'" class="placeholder-view">
-        <Activity :size="48" class="ph-icon" />
-        <h3>{{ t('nav.service') }}</h3>
-        <div class="raw-status-box">
-          <pre>{{ JSON.stringify({ daeStatus, backendHealth }, null, 2) }}</pre>
-        </div>
-      </div>
-
+      <ServiceView v-else-if="activeTab === 'service'" />
       <UpdateView v-else-if="activeTab === 'update'" />
       <SettingsView v-else-if="activeTab === 'settings'" />
     </main>

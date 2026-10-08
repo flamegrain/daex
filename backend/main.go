@@ -369,6 +369,11 @@ func main() {
 		writeJSON(w, http.StatusOK, daeStatus(r.Context(), o))
 	})
 
+	// 1.1 Service Management endpoints (dae & webui)
+	mux.HandleFunc("GET /api/service/status", handleGetServicesOverview(o))
+	mux.HandleFunc("POST /api/service/action", handleServiceAction(o))
+	mux.HandleFunc("GET /api/service/logs", handleGetServiceLogs(o))
+
 	// 2. Dashboard metrics (Traffic, Nodes, Groups)
 	mux.HandleFunc("GET /api/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		trafficMu.RLock()
