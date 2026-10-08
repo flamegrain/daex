@@ -19,7 +19,10 @@ import {
   Copy,
   Clock,
   HardDrive,
-  FileText
+  FileText,
+  ChevronDown,
+  X,
+  Plus
 } from 'lucide-vue-next'
 import { t } from '../composables/useSettings'
 
@@ -50,10 +53,12 @@ const searchQuery = ref('')
 const selectedLevel = ref('ALL')
 const selectedTag = ref('all')
 
-// Backups Modal
-const showBackupModal = ref(false)
+// Backups Dropdown Menu
+const showBackupMenu = ref(false)
+const backupMenuRef = ref<HTMLElement | null>(null)
 const backupLabel = ref('')
 const creatingBackup = ref(false)
+const loadingBackups = ref(false)
 const backupsList = ref<LogBackupItem[]>([])
 
 let timer: any = null
@@ -125,7 +130,8 @@ function downloadCurrentLogs() {
 }
 
 // Backups
-async function fetchBackups() {
+async function fetchBackups(showSpinner = false) {
+  if (showSpinner) loadingBackups.value = true
   try {
     const res = await fetch('/api/logs/backups')
     if (res.ok) {
@@ -134,6 +140,21 @@ async function fetchBackups() {
     }
   } catch (err) {
     console.error('Fetch log backups error:', err)
+  } finally {
+    if (showSpinner) loadingBackups.value = false
+  }
+}
+
+function toggleBackupMenu() {
+  showBackupMenu.value = !showBackupMenu.value
+  if (showBackupMenu.value) {
+    fetchBackups(true)
+  }
+}
+
+function handleDocumentClick(e: MouseEvent) {
+  if (showBackupMenu.value && backupMenuRef.value && !backupMenuRef.value.contains(e.target as Node)) {
+    showBackupMenu.value = false
   }
 }
 
@@ -176,11 +197,6 @@ async function deleteBackupItem(name: string) {
   }
 }
 
-function openBackupManager() {
-  fetchBackups()
-  showBackupModal.value = true
-}
-
 function copyLogLine(raw: string) {
   navigator.clipboard.writeText(raw)
 }
@@ -207,10 +223,12 @@ onMounted(() => {
       fetchLogs(false)
     }
   }, 3000)
+  document.addEventListener('click', handleDocumentClick)
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  document.removeEventListener('click', handleDocumentClick)
 })
 </script>
 
@@ -280,15 +298,134 @@ onUnmounted(() => {
           <span>{{ t('logs.btn_download') }}</span>
         </button>
 
-        <!-- Backup Logs Button -->
-        <button
-          class="btn btn-primary btn-sm"
-          @click="openBackupManager"
-          :title="t('logs.btn_backup')"
-        >
-          <Archive :size="13" />
-          <span>{{ t('logs.btn_backup') }}</span>
-        </button>
+        <!-- Backup Logs Dropdown Menu Container -->
+        <div class="backup-menu-container" ref="backupMenuRef">
+          <button
+            class="btn btn-primary btn-sm backup-trigger-btn"
+            :class="{ active: showBackupMenu }"
+            @click.stop="toggleBackupMenu"
+            :title="t('logs.btn_backup')"
+          >
+            <Archive :size="13" />
+            <span>{{ t('logs.btn_backup') }}</span>
+            <ChevronDown :size="12" class="chevron-icon" :class="{ open: showBackupMenu }" />
+          </button>
+
+          <!-- Dropdown Popup Menu -->
+          <Transition name="dropdown-pop">
+            <div v-if="showBackupMenu" class="backup-dropdown-menu" @click.stop>
+              <!-- Menu Header -->
+              <div class="menu-header">
+                <div class="menu-title-row">
+                  <Archive :size="15" class="header-icon" />
+                  <span class="menu-title">{{ t('logs.modal_backup_title') }}</span>
+                  <span class="count-badge" v-if="backupsList.length > 0">{{ backupsList.length }}</span>
+                </div>
+                <div class="header-tools">
+                  <button
+                    class="tool-btn"
+                    @click="fetchBackups(true)"
+                    :disabled="loadingBackups"
+                    :title="t('logs.btn_refresh')"
+                  >
+                    <RefreshCw :size="12" :class="{ spin: loadingBackups }" />
+                  </button>
+                  <button
+                    class="tool-btn close-tool-btn"
+                    @click="showBackupMenu = false"
+                    :title="t('common.close')"
+                  >
+                    <X :size="13" />
+                  </button>
+                </div>
+              </div>
+
+              <!-- Menu Body -->
+              <div class="backup-menu-body">
+                <!-- Create Snapshot Section -->
+                <div class="menu-create-section">
+                  <div class="create-label-row">
+                    <span>{{ t('logs.menu_new_backup') }}</span>
+                  </div>
+                  <div class="create-row">
+                    <input
+                      type="text"
+                      v-model="backupLabel"
+                      :placeholder="t('logs.modal_backup_ph')"
+                      class="menu-input"
+                      @keydown.enter="createLogBackup"
+                    />
+                    <button
+                      class="btn btn-primary btn-sm btn-create"
+                      :disabled="creatingBackup"
+                      @click="createLogBackup"
+                    >
+                      <Plus v-if="!creatingBackup" :size="12" />
+                      <RefreshCw v-else :size="12" class="spin" />
+                      <span>{{ creatingBackup ? t('logs.modal_backup_creating') : t('logs.modal_backup_create') }}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- History Backups Section -->
+                <div class="menu-history-section">
+                  <div class="history-label-row">
+                    <span>{{ t('logs.backups_history_title') }}</span>
+                    <span class="history-count" v-if="backupsList.length">({{ backupsList.length }})</span>
+                  </div>
+
+                  <!-- Empty State -->
+                  <div v-if="backupsList.length === 0" class="menu-empty">
+                    <FileText :size="24" class="empty-icon" />
+                    <span>{{ t('logs.modal_backup_empty') }}</span>
+                  </div>
+
+                  <!-- Scrollable List -->
+                  <div v-else class="menu-list-wrapper">
+                    <div
+                      v-for="b in backupsList"
+                      :key="b.name"
+                      class="backup-item"
+                    >
+                      <div class="backup-item-left">
+                        <div class="item-name-row">
+                          <FileText :size="13" class="item-icon" />
+                          <span class="item-name mono" :title="b.name">{{ b.name }}</span>
+                        </div>
+                        <div class="item-meta mono">
+                          <span class="meta-tag">{{ formatBytes(b.size) }}</span>
+                          <span class="meta-sep">&bull;</span>
+                          <span class="meta-time">{{ b.modTime }}</span>
+                        </div>
+                      </div>
+                      <div class="backup-item-actions">
+                        <button
+                          class="item-act-btn download"
+                          @click="downloadBackupItem(b.name)"
+                          :title="t('common.download')"
+                        >
+                          <Download :size="13" />
+                        </button>
+                        <button
+                          class="item-act-btn delete"
+                          @click="deleteBackupItem(b.name)"
+                          :title="t('common.delete')"
+                        >
+                          <Trash2 :size="13" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Footer Hint -->
+              <div class="menu-footer">
+                <span class="footer-hint">{{ t('logs.modal_backup_hint') }}</span>
+              </div>
+            </div>
+          </Transition>
+        </div>
       </div>
     </header>
 
@@ -429,93 +566,6 @@ onUnmounted(() => {
         </div>
       </div>
     </main>
-
-    <!-- Backup Manager Modal -->
-    <div v-if="showBackupModal" class="modal-backdrop" @click.self="showBackupModal = false">
-      <div class="modal-card modal-backup">
-        <div class="modal-header">
-          <div class="modal-title-row">
-            <Archive :size="18" class="text-accent" />
-            <h3>{{ t('logs.modal_backup_title') }}</h3>
-          </div>
-          <button class="close-btn" @click="showBackupModal = false">&times;</button>
-        </div>
-
-        <div class="modal-body">
-          <!-- Create Backup Bar -->
-          <div class="create-backup-section">
-            <label class="section-lbl">{{ t('logs.modal_backup_title') }}</label>
-            <div class="create-input-row">
-              <input
-                type="text"
-                v-model="backupLabel"
-                :placeholder="t('logs.modal_backup_ph')"
-                class="form-input"
-                @keydown.enter="createLogBackup"
-              />
-              <button
-                class="btn btn-primary"
-                :disabled="creatingBackup"
-                @click="createLogBackup"
-              >
-                <Archive :size="13" />
-                <span>{{ creatingBackup ? t('logs.modal_backup_creating') : t('logs.modal_backup_create') }}</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Existing Backups List -->
-          <div class="backups-list-section">
-            <label class="section-lbl">{{ t('logs.modal_backup_title') }} ({{ backupsList.length }})</label>
-
-            <div v-if="backupsList.length === 0" class="backups-empty">
-              <FileText :size="32" class="text-muted" />
-              <p>{{ t('logs.modal_backup_empty') }}</p>
-            </div>
-
-            <div v-else class="backups-table-wrap">
-              <table class="backups-table">
-                <thead>
-                  <tr>
-                    <th>{{ t('common.name') }}</th>
-                    <th style="width: 100px">{{ t('common.size') }}</th>
-                    <th style="width: 150px">{{ t('common.time') }}</th>
-                    <th style="width: 120px; text-align: right">{{ t('common.action') }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="b in backupsList" :key="b.name">
-                    <td class="mono b-name">{{ b.name }}</td>
-                    <td class="mono">{{ formatBytes(b.size) }}</td>
-                    <td class="text-muted">{{ b.modTime }}</td>
-                    <td style="text-align: right">
-                      <button
-                        class="btn-icon"
-                        @click="downloadBackupItem(b.name)"
-                        :title="t('common.download')"
-                      >
-                        <Download :size="13" />
-                      </button>
-                      <button
-                        class="btn-icon delete"
-                        @click="deleteBackupItem(b.name)"
-                        :title="t('common.delete')"
-                      >
-                        <Trash2 :size="13" />
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showBackupModal = false">{{ t('common.close') }}</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -903,94 +953,376 @@ onUnmounted(() => {
   color: #0284c7;
 }
 
-/* Backups Modal */
-.modal-card.modal-backup {
-  width: 680px;
-  max-width: 95vw;
+/* ========================================================
+   BACKUP DROPDOWN MENU
+   ======================================================== */
+.backup-menu-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
 }
 
-.modal-title-row {
+.backup-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+
+.chevron-icon {
+  transition: transform 0.2s ease;
+  opacity: 0.8;
+}
+
+.chevron-icon.open {
+  transform: rotate(180deg);
+}
+
+.backup-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 440px;
+  max-width: 92vw;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 10px;
+  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.5), 0 6px 16px -2px rgba(0, 0, 0, 0.3);
+  z-index: 1050;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+}
+
+/* Dropdown Animation */
+.dropdown-pop-enter-active,
+.dropdown-pop-leave-active {
+  transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dropdown-pop-enter-from,
+.dropdown-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.98);
+}
+
+/* Menu Header */
+.menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-color, #1e293b);
+}
+
+.menu-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.modal-title-row h3 {
-  margin: 0;
-  font-size: 15px;
+.menu-title {
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text-main, #f8fafc);
 }
 
-.create-backup-section {
+.count-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(2, 132, 199, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(2, 132, 199, 0.3);
+}
+
+.header-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tool-btn:hover:not(:disabled) {
+  background: var(--bg-input, #1e293b);
+  color: var(--text-main, #f8fafc);
+  border-color: var(--border-color, #334155);
+}
+
+.tool-btn.close-tool-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Menu Body */
+.backup-menu-body {
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 20px;
+  gap: 12px;
 }
 
-.section-lbl {
-  font-size: 12px;
+/* Create Section */
+.menu-create-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.create-label-row,
+.history-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-muted, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
-.create-input-row {
+.create-row {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 
-.create-input-row .form-input {
+.menu-input {
   flex: 1;
-  padding: 8px 12px;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 12px;
   background: var(--bg-input, #090d16);
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 6px;
   color: var(--text-main, #f8fafc);
-  font-size: 12px;
   outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.backups-empty {
-  padding: 30px;
-  text-align: center;
+.menu-input:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+}
+
+.btn-create {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* History List Section */
+.menu-history-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-count {
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
+}
+
+.menu-empty {
+  padding: 24px 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 6px;
   color: var(--text-muted, #64748b);
   font-size: 12px;
+  border: 1px dashed var(--border-color, #1e293b);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
 }
 
-.backups-table-wrap {
-  max-height: 260px;
+.menu-empty .empty-icon {
+  opacity: 0.5;
+  color: var(--text-muted, #64748b);
+}
+
+.menu-list-wrapper {
+  max-height: 220px;
   overflow-y: auto;
   border: 1px solid var(--border-color, #1e293b);
-  border-radius: 6px;
-}
-
-.backups-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.backups-table th {
-  padding: 8px 12px;
-  text-align: left;
+  border-radius: 8px;
   background: var(--bg-input, #090d16);
-  color: var(--text-muted, #94a3b8);
-  font-weight: 600;
-  border-bottom: 1px solid var(--border-color, #1e293b);
 }
 
-.backups-table td {
-  padding: 8px 12px;
+.backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border-color, #1e293b);
-  color: var(--text-main, #f8fafc);
+  transition: background 0.12s ease;
 }
 
-.b-name {
+.backup-item:last-child {
+  border-bottom: none;
+}
+
+.backup-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.backup-item-left {
+  flex: 1;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.item-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.item-icon {
   color: #0284c7;
+  flex-shrink: 0;
+}
+
+.item-name {
+  font-size: 12px;
+  color: var(--text-main, #f8fafc);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 2px;
+}
+
+.meta-tag {
+  color: #38bdf8;
+}
+
+.meta-sep {
+  opacity: 0.5;
+}
+
+.meta-time {
+  color: var(--text-muted, #64748b);
+}
+
+.backup-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.item-act-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.item-act-btn.download:hover {
+  background: rgba(2, 132, 199, 0.15);
+  color: #38bdf8;
+  border-color: rgba(2, 132, 199, 0.3);
+}
+
+.item-act-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Menu Footer */
+.menu-footer {
+  padding: 8px 14px;
+  background: rgba(0, 0, 0, 0.12);
+  border-top: 1px solid var(--border-color, #1e293b);
+}
+
+.footer-hint {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  display: block;
+  line-height: 1.4;
+}
+
+/* Light Theme Overrides */
+[data-theme="light"] .backup-dropdown-menu {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.15), 0 6px 16px -2px rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="light"] .menu-header {
+  background: #f8fafc !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .menu-title {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .menu-input {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .menu-empty {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .menu-list-wrapper {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .backup-item {
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .backup-item:hover {
+  background: #f1f5f9 !important;
+}
+
+[data-theme="light"] .item-name {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .menu-footer {
+  background: #f8fafc !important;
+  border-top-color: #e2e8f0 !important;
 }
 
 /* Helpers */
