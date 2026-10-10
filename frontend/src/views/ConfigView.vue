@@ -275,6 +275,32 @@ const currentProfileNote = computed(() => {
   return p?.note || ''
 })
 
+// Batch profile selection & deletion
+const selectedProfileNames = ref<string[]>([])
+const batchDeleting = ref(false)
+
+const selectableProfiles = computed(() => {
+  return configProfiles.value.filter(p => !p.isActive)
+})
+
+const isAllSelected = computed(() => {
+  if (selectableProfiles.value.length === 0) return false
+  return selectableProfiles.value.every(p => selectedProfileNames.value.includes(p.name))
+})
+
+const isIndeterminate = computed(() => {
+  const count = selectedProfileNames.value.length
+  return count > 0 && !isAllSelected.value
+})
+
+function toggleSelectAllProfiles() {
+  if (isAllSelected.value) {
+    selectedProfileNames.value = []
+  } else {
+    selectedProfileNames.value = selectableProfiles.value.map(p => p.name)
+  }
+}
+
 // Modal states for CRUD
 const showNodeModal = ref(false)
 const nodeModalMode = ref<'add' | 'edit'>('add')
@@ -630,6 +656,40 @@ async function deleteProfile(name: string) {
     }
   } catch (e: any) {
     alert(t('config.req_fail', { error: e.message }))
+  }
+}
+
+async function batchDeleteProfiles() {
+  const targets = selectedProfileNames.value.filter(name => name !== activeRunningConfig.value)
+  if (targets.length === 0) {
+    alert(t('config.batch_delete_no_selection'))
+    return
+  }
+  if (!confirm(t('config.batch_delete_confirm', { count: targets.length }))) {
+    return
+  }
+  batchDeleting.value = true
+  let successCount = 0
+  let failCount = 0
+  for (const name of targets) {
+    try {
+      const res = await fetch(`/api/configs/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      if (res.ok) {
+        successCount++
+      } else {
+        failCount++
+      }
+    } catch {
+      failCount++
+    }
+  }
+  selectedProfileNames.value = []
+  batchDeleting.value = false
+  await fetchConfigProfiles()
+  if (failCount > 0) {
+    alert(t('config.batch_delete_partial', { success: successCount, fail: failCount }))
+  } else {
+    alert(t('config.batch_delete_success', { count: successCount }))
   }
 }
 
@@ -1535,6 +1595,23 @@ onMounted(async () => {
             <Plus :size="15" />
             <span>{{ t('config.btn_new_profile') }}</span>
           </button>
+          <button
+            class="btn btn-secondary"
+            @click="toggleSelectAllProfiles"
+            :title="isAllSelected ? t('config.btn_deselect_all') : t('config.btn_select_all')"
+          >
+            <CheckSquare :size="15" />
+            <span>{{ isAllSelected ? t('config.btn_deselect_all') : t('config.btn_select_all') }}</span>
+          </button>
+          <button
+            class="btn btn-secondary danger"
+            :disabled="selectedProfileNames.length === 0 || batchDeleting"
+            @click="batchDeleteProfiles"
+            :title="t('config.btn_batch_delete')"
+          >
+            <Trash2 :size="15" />
+            <span>{{ selectedProfileNames.length > 0 ? `${t('config.btn_batch_delete')} (${selectedProfileNames.length})` : t('config.btn_batch_delete') }}</span>
+          </button>
           <button class="btn btn-secondary" @click="openBackupManager" :title="t('config.backup_btn')">
             <Archive :size="15" />
             <span>{{ t('config.backup_btn') }}</span>
@@ -1546,25 +1623,43 @@ onMounted(async () => {
         <table class="profiles-table">
           <thead>
             <tr>
-              <th style="min-width: 200px">{{ t('config.col_profile_name') }}</th>
-              <th style="min-width: 240px">{{ t('config.col_profile_note') }}</th>
-              <th style="width: 120px">{{ t('config.col_profile_rules') }}</th>
-              <th style="width: 120px">{{ t('config.col_profile_nodes') }}</th>
-              <th style="width: 170px">{{ t('config.col_profile_mod') }}</th>
-              <th style="width: 120px">{{ t('config.col_profile_status') }}</th>
-              <th style="width: 220px; text-align: right">{{ t('config.col_profile_action') }}</th>
+              <th style="width: 44px; text-align: center">
+                <input
+                  type="checkbox"
+                  :checked="isAllSelected"
+                  :indeterminate="isIndeterminate"
+                  @change="toggleSelectAllProfiles"
+                  :title="t('config.btn_select_all')"
+                />
+              </th>
+              <th style="width: 140px; max-width: 160px">{{ t('config.col_profile_name') }}</th>
+              <th style="min-width: 220px">{{ t('config.col_profile_note') }}</th>
+              <th style="width: 110px">{{ t('config.col_profile_rules') }}</th>
+              <th style="width: 110px">{{ t('config.col_profile_nodes') }}</th>
+              <th style="width: 160px">{{ t('config.col_profile_mod') }}</th>
+              <th style="width: 110px">{{ t('config.col_profile_status') }}</th>
+              <th style="width: 270px; min-width: 270px; text-align: right">{{ t('config.col_profile_action') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr
               v-for="p in configProfiles"
               :key="p.name"
-              :class="{ 'row-active': p.isActive }"
+              :class="{ 'row-active': p.isActive, 'row-selected': selectedProfileNames.includes(p.name) }"
               @dblclick="openEditProfile(p.name)"
             >
+              <td class="checkbox-col" @click.stop style="text-align: center; width: 44px">
+                <input
+                  type="checkbox"
+                  :value="p.name"
+                  v-model="selectedProfileNames"
+                  :disabled="p.isActive"
+                  :title="p.isActive ? t('config.cannot_delete_active') : ''"
+                />
+              </td>
               <td class="profile-name-cell">
-                <div class="profile-name-wrap">
-                  <FileCode :size="16" class="text-info" />
+                <div class="profile-name-wrap" :title="p.name">
+                  <FileCode :size="15" class="text-info flex-shrink-0" />
                   <span class="profile-filename font-bold">{{ p.name }}</span>
                 </div>
               </td>
@@ -5502,15 +5597,27 @@ onMounted(async () => {
   background: rgba(16, 185, 129, 0.04);
 }
 
+.profile-name-cell {
+  width: 140px;
+  max-width: 160px;
+  white-space: nowrap;
+}
+
 .profile-name-wrap {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  max-width: 155px;
 }
 
 .profile-filename {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-main, #f8fafc);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  max-width: 120px;
 }
 
 .profile-note-text {
@@ -5560,22 +5667,72 @@ onMounted(async () => {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  white-space: nowrap;
 }
 
 .btn-edit-profile {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   font-size: 12px;
-  padding: 5px 12px;
+  padding: 5px 0;
+  width: 90px;
+  min-width: 90px;
+  max-width: 90px;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .btn-activate-profile {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   font-size: 12px;
-  padding: 5px 12px;
+  padding: 5px 0;
+  width: 90px;
+  min-width: 90px;
+  max-width: 90px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.checkbox-col {
+  padding: 14px 8px !important;
+}
+
+.checkbox-col input[type="checkbox"],
+.profiles-table th:first-child input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #0284c7;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  vertical-align: middle;
+}
+
+.profiles-table tr.row-selected {
+  background: rgba(14, 165, 233, 0.08) !important;
+}
+
+.header-actions .btn.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.header-actions .btn.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: #ef4444;
+}
+
+.header-actions .btn.danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 /* ==================== Profile Detail Header Styles ==================== */
