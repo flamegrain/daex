@@ -512,6 +512,17 @@ func main() {
 		writeJSON(w, http.StatusOK, res)
 	})
 
+	// 2.4.2 Rule lists update (gfwlist, chnroute, chnroute6, direct-list)
+	mux.HandleFunc("GET /api/update/rule-lists", handleGetRuleLists(o))
+	mux.HandleFunc("POST /api/update/rule-lists", handleUpdateRuleLists(o))
+
+	// 2.5 Routing Modes management
+	mux.HandleFunc("GET /api/config/modes", handleGetRoutingModes(o))
+	mux.HandleFunc("POST /api/config/modes/apply", handleApplyRoutingMode(o))
+	mux.HandleFunc("POST /api/config/modes/create", handleCreateCustomMode(o))
+	mux.HandleFunc("DELETE /api/config/modes/{id}", handleDeleteCustomMode(o))
+	mux.HandleFunc("POST /api/config/modes/test", handleTestRoutingMode(o))
+
 	// 3. Config files list and profiles management
 	mux.HandleFunc("GET /api/configs", func(w http.ResponseWriter, r *http.Request) {
 		profiles, err := listConfigProfiles(o.DaeConfig)

@@ -37,8 +37,13 @@ import {
   Sparkles,
   ExternalLink,
   ChevronDown,
-  ChevronUp,
-  Info
+  Info,
+  Compass,
+  Globe,
+  Shield,
+  Zap,
+  Eye,
+  X
 } from 'lucide-vue-next'
 import {
   analyzeRoutingConflicts,
@@ -107,10 +112,61 @@ interface DaeConfigModel {
 }
 
 type Mode = 'form' | 'code'
-type FormSection = 'nodes' | 'groups' | 'routing' | 'global' | 'subscriptions'
+type FormSection = 'modes' | 'nodes' | 'groups' | 'routing' | 'global' | 'subscriptions'
+
+interface RoutingModeRule {
+  condition: string
+  target: string
+}
+
+interface FastTestItem {
+  id: string
+  name: string
+  url: string
+  category: string
+  expectedOut: string
+  matchedRule: string
+  status: string
+  latency: number
+  httpCode: number
+  message: string
+}
+
+interface RoutingModeItem {
+  id: string
+  name: string
+  description: string
+  badge: string
+  isCustom: boolean
+  rules: RoutingModeRule[]
+  testResults: FastTestItem[]
+}
 
 const currentMode = ref<Mode>('form')
-const activeSection = ref<FormSection>('nodes')
+const activeSection = ref<FormSection>('modes')
+
+const modesList = ref<RoutingModeItem[]>([])
+const activeModeId = ref('bypass_cn')
+const loadingModes = ref(false)
+const applyingModeId = ref<string | null>(null)
+const testingModeId = ref<string | null>(null)
+
+const showModeRulesModal = ref(false)
+const viewingMode = ref<RoutingModeItem | null>(null)
+
+const showNewModeModal = ref(false)
+const newModeForm = ref({
+  name: '',
+  description: '',
+  badge: '自定义',
+  rulesText: 'pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct\ndip(224.0.0.0/3, "ff00::/8") -> direct\ndip(geoip:private) -> direct\nfallback: direct'
+})
+const savingNewMode = ref(false)
+
+function getActiveModeBadge() {
+  const m = modesList.value.find(item => item.id === activeModeId.value)
+  return m ? (m.badge || m.name) : '绕过大陆'
+}
 
 const editorContainer = ref<HTMLDivElement | null>(null)
 const editorView = shallowRef<EditorView | null>(null)
@@ -1115,8 +1171,154 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
+async function fetchModes() {
+  loadingModes.value = true
+  try {
+    const res = await fetch('/api/config/modes')
+    if (res.ok) {
+      const data = await res.json()
+      modesList.value = data.modes || []
+      activeModeId.value = data.activeModeId || 'bypass_cn'
+    }
+  } catch (err) {
+    console.error('Fetch modes error:', err)
+  } finally {
+    loadingModes.value = false
+  }
+}
+
+async function applyMode(mode: RoutingModeItem) {
+  if (applyingModeId.value) return
+  applyingModeId.value = mode.id
+  try {
+    const res = await fetch('/api/config/modes/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modeId: mode.id })
+    })
+    const data = await res.json()
+    if (res.ok && data.ok) {
+      activeModeId.value = mode.id
+      if (data.content) {
+        setEditorText(data.content)
+      }
+      const modelRes = await fetch('/api/config/model')
+      if (modelRes.ok) {
+        configModel.value = await modelRes.json()
+      }
+      isDirty.value = false
+      alert(data.message || `已成功应用「${mode.name}」`)
+    } else {
+      alert(data.error || '应用模式失败')
+    }
+  } catch (err: any) {
+    alert(err.message || '网络请求错误')
+  } finally {
+    applyingModeId.value = null
+  }
+}
+
+async function runFastTestForMode(modeId: string) {
+  testingModeId.value = modeId
+  try {
+    const res = await fetch('/api/config/modes/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modeId })
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const m = modesList.value.find(item => item.id === modeId)
+      if (m && data.testResults) {
+        m.testResults = data.testResults
+      }
+    }
+  } catch (err) {
+    console.error('Test mode error:', err)
+  } finally {
+    testingModeId.value = null
+  }
+}
+
+function openViewRules(mode: RoutingModeItem) {
+  viewingMode.value = mode
+  showModeRulesModal.value = true
+}
+
+function openNewModeModal() {
+  newModeForm.value = {
+    name: '',
+    description: '',
+    badge: '自定义',
+    rulesText: 'pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct\ndip(224.0.0.0/3, "ff00::/8") -> direct\ndip(geoip:private) -> direct\nfallback: direct'
+  }
+  showNewModeModal.value = true
+}
+
+async function saveCustomMode() {
+  if (!newModeForm.value.name.trim()) {
+    alert(t('modes.new_name_label') + '不能为空')
+    return
+  }
+  const rawLines = newModeForm.value.rulesText.split('\n')
+  const rules: RoutingModeRule[] = []
+  for (const l of rawLines) {
+    const trimmed = l.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    if (trimmed.includes('->')) {
+      const [c, t] = trimmed.split('->')
+      rules.push({ condition: c.trim(), target: t.trim() })
+    } else if (trimmed.startsWith('fallback:') || trimmed.startsWith('fallback :')) {
+      const parts = trimmed.split(':')
+      rules.push({ condition: 'fallback', target: parts[1].trim() })
+    }
+  }
+  if (rules.length === 0) {
+    alert('请输入至少一条有效的路由规则 (格式: condition -> target)')
+    return
+  }
+
+  savingNewMode.value = true
+  try {
+    const res = await fetch('/api/config/modes/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newModeForm.value.name.trim(),
+        description: newModeForm.value.description.trim(),
+        badge: newModeForm.value.badge.trim() || '自定义',
+        rules
+      })
+    })
+    const data = await res.json()
+    if (res.ok && data.ok) {
+      showNewModeModal.value = false
+      await fetchModes()
+    } else {
+      alert(data.error || '创建自定义模式失败')
+    }
+  } catch (err: any) {
+    alert(err.message || '请求错误')
+  } finally {
+    savingNewMode.value = false
+  }
+}
+
+async function deleteCustomMode(mode: RoutingModeItem) {
+  if (!confirm(t('modes.del_confirm', { name: mode.name }))) return
+  try {
+    const res = await fetch(`/api/config/modes/${mode.id}`, { method: 'DELETE' })
+    if (res.ok) {
+      await fetchModes()
+    }
+  } catch (err) {
+    console.error('Delete mode error:', err)
+  }
+}
+
 onMounted(() => {
   loadConfig()
+  fetchModes()
 })
 </script>
 
@@ -1269,6 +1471,15 @@ onMounted(() => {
         <div class="form-subnav">
           <button
             class="subnav-item"
+            :class="{ active: activeSection === 'modes' }"
+            @click="activeSection = 'modes'"
+          >
+            <Compass :size="15" />
+            <span>{{ t('config.section.modes') }}</span>
+            <span class="count-pill badge-active-mode">{{ getActiveModeBadge() }}</span>
+          </button>
+          <button
+            class="subnav-item"
             :class="{ active: activeSection === 'nodes' }"
             @click="activeSection = 'nodes'"
           >
@@ -1311,6 +1522,144 @@ onMounted(() => {
             <span>{{ t('config.section.subscriptions') }}</span>
             <span class="count-pill">{{ configModel.subscriptions.length }}</span>
           </button>
+        </div>
+
+        <!-- Section 0: Routing Modes -->
+        <div v-if="activeSection === 'modes'" class="form-section-body">
+          <div class="section-title-bar">
+            <div>
+              <h3>{{ t('modes.title') }}</h3>
+              <p>{{ t('modes.subtitle') }}</p>
+            </div>
+            <button class="btn btn-primary" @click="openNewModeModal">
+              <Plus :size="14" /> {{ t('modes.btn_new') }}
+            </button>
+          </div>
+
+          <!-- Modes Cards Grid -->
+          <div class="modes-grid">
+            <div
+              v-for="mode in modesList"
+              :key="mode.id"
+              class="mode-card"
+              :class="{ 'mode-active': mode.id === activeModeId }"
+            >
+              <!-- Card Top -->
+              <div class="mode-card-header">
+                <div class="mode-title-wrap">
+                  <div class="mode-icon-avatar" :class="mode.id">
+                    <Shield v-if="mode.id === 'gfwlist'" :size="20" />
+                    <Compass v-else-if="mode.id === 'bypass_cn'" :size="20" />
+                    <Flag v-else-if="mode.id === 'only_cn'" :size="20" />
+                    <Globe v-else-if="mode.id === 'global'" :size="20" />
+                    <Sliders v-else :size="20" />
+                  </div>
+                  <div>
+                    <div class="mode-name-row">
+                      <h4>{{ mode.name }}</h4>
+                      <span class="mode-tag">{{ mode.badge }}</span>
+                    </div>
+                    <span v-if="mode.id === activeModeId" class="badge-active-glow">
+                      <Check :size="12" /> {{ t('modes.active_badge') }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="mode-actions">
+                  <button
+                    v-if="mode.id !== activeModeId"
+                    class="btn btn-primary btn-sm btn-apply-mode"
+                    :disabled="applyingModeId === mode.id"
+                    @click="applyMode(mode)"
+                  >
+                    <Check v-if="applyingModeId !== mode.id" :size="13" />
+                    <RefreshCw v-else :size="13" class="spin" />
+                    <span>{{ applyingModeId === mode.id ? t('modes.applying') : t('modes.apply_btn') }}</span>
+                  </button>
+                  <button
+                    v-if="mode.isCustom"
+                    class="btn-icon-subtle danger"
+                    @click="deleteCustomMode(mode)"
+                    :title="t('common.delete')"
+                  >
+                    <Trash2 :size="13" />
+                  </button>
+                </div>
+              </div>
+
+              <!-- Card Body / Desc -->
+              <p class="mode-desc">{{ mode.description }}</p>
+
+              <!-- Rules & Toolbar preview -->
+              <div class="mode-meta-bar">
+                <div class="rules-info">
+                  <span class="rules-count-pill">{{ mode.rules.length }} 条分流规则</span>
+                  <button class="btn-text-link" @click="openViewRules(mode)">
+                    <Eye :size="13" />
+                    <span>{{ t('modes.view_rules', { count: mode.rules.length }) }}</span>
+                  </button>
+                </div>
+                <button
+                  class="btn btn-secondary btn-xs btn-fast-test"
+                  :disabled="testingModeId === mode.id"
+                  @click="runFastTestForMode(mode.id)"
+                >
+                  <Zap :size="12" :class="{ 'text-warning': testingModeId !== mode.id, spin: testingModeId === mode.id }" />
+                  <span>{{ testingModeId === mode.id ? t('modes.fast_testing') : t('modes.fast_test') }}</span>
+                </button>
+              </div>
+
+              <!-- Fast Test Results Panel -->
+              <div class="mode-test-panel">
+                <div class="test-panel-header">
+                  <span class="test-panel-title">
+                    <Zap :size="13" class="text-warning" />
+                    {{ t('modes.test_panel_title') }}
+                  </span>
+                  <span class="test-hint">{{ t('modes.test_panel_desc') }}</span>
+                </div>
+                <div class="test-items-list">
+                  <div
+                    v-for="item in mode.testResults"
+                    :key="item.id"
+                    class="test-item-row"
+                  >
+                    <div class="item-col target-col">
+                      <span class="target-name">{{ item.name }}</span>
+                      <span class="target-cat">{{ item.category }}</span>
+                    </div>
+
+                    <div class="item-col out-col">
+                      <span
+                        class="badge-out"
+                        :class="{
+                          'out-direct': item.expectedOut.includes('direct') || item.expectedOut.includes('直连'),
+                          'out-proxy': item.expectedOut.includes('proxy') || item.expectedOut.includes('代理'),
+                          'out-block': item.expectedOut.includes('block') || item.expectedOut.includes('阻断')
+                        }"
+                      >
+                        {{ item.expectedOut }}
+                      </span>
+                    </div>
+
+                    <div class="item-col rule-col" :title="item.matchedRule">
+                      <code>{{ item.matchedRule }}</code>
+                    </div>
+
+                    <div class="item-col latency-col">
+                      <span class="latency-badge" :class="item.latency < 40 ? 'fast' : (item.latency < 90 ? 'medium' : 'slow')">
+                        {{ item.latency }} ms
+                      </span>
+                    </div>
+
+                    <div class="item-col detail-col" :title="item.message">
+                      <span class="detail-text">{{ item.message }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Section 1: Nodes -->
@@ -2396,6 +2745,126 @@ onMounted(() => {
                 <span>{{ t('config.btn_import_selected_nodes', { count: selectedSubNodesCount }) }}</span>
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: View Mode Rules Collection -->
+      <div v-if="showModeRulesModal && viewingMode" class="modal-backdrop" @click.self="showModeRulesModal = false">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-header">
+            <div class="modal-title-wrap">
+              <Eye :size="18" class="text-primary" />
+              <h3>{{ t('modes.rules_modal_title', { name: viewingMode.name }) }}</h3>
+            </div>
+            <button class="btn-icon-subtle" @click="showModeRulesModal = false">
+              <X :size="16" />
+            </button>
+          </div>
+          <div class="modal-body">
+            <p class="modal-notice-text">{{ t('modes.rules_modal_desc') }}</p>
+            <div class="rules-table-container">
+              <table class="rules-table">
+                <thead>
+                  <tr>
+                    <th style="width: 50px">#</th>
+                    <th>{{ t('modes.col_condition') }}</th>
+                    <th style="width: 140px">{{ t('modes.col_target') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(r, idx) in viewingMode.rules" :key="idx">
+                    <td class="rule-idx">{{ idx + 1 }}</td>
+                    <td class="rule-cond mono">{{ r.condition }}</td>
+                    <td class="rule-target">
+                      <span
+                        class="badge-out"
+                        :class="{
+                          'out-direct': r.target.includes('direct'),
+                          'out-proxy': r.target.includes('proxy'),
+                          'out-block': r.target.includes('block')
+                        }"
+                      >
+                        {{ r.target }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" @click="showModeRulesModal = false">{{ t('common.close') }}</button>
+            <button
+              v-if="viewingMode.id !== activeModeId"
+              class="btn btn-primary"
+              :disabled="applyingModeId === viewingMode.id"
+              @click="applyMode(viewingMode); showModeRulesModal = false"
+            >
+              <Check :size="14" />
+              <span>{{ t('modes.apply_btn') }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Create Custom Routing Mode -->
+      <div v-if="showNewModeModal" class="modal-backdrop" @click.self="showNewModeModal = false">
+        <div class="modal-dialog modal-md">
+          <div class="modal-header">
+            <div class="modal-title-wrap">
+              <Plus :size="18" class="text-primary" />
+              <h3>{{ t('modes.new_modal_title') }}</h3>
+            </div>
+            <button class="btn-icon-subtle" @click="showNewModeModal = false">
+              <X :size="16" />
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label required">{{ t('modes.new_name_label') }}</label>
+              <input
+                v-model="newModeForm.name"
+                class="form-control"
+                :placeholder="t('modes.new_name_ph')"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('modes.new_badge_label') }}</label>
+              <input
+                v-model="newModeForm.badge"
+                class="form-control"
+                :placeholder="t('modes.new_badge_ph')"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('modes.new_desc_label') }}</label>
+              <input
+                v-model="newModeForm.description"
+                class="form-control"
+                :placeholder="t('modes.new_desc_ph')"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label required">{{ t('modes.new_rules_label') }}</label>
+              <textarea
+                v-model="newModeForm.rulesText"
+                class="form-control mono"
+                rows="7"
+                :placeholder="t('modes.new_rules_ph')"
+              ></textarea>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" @click="showNewModeModal = false">{{ t('common.cancel') }}</button>
+            <button
+              class="btn btn-primary"
+              :disabled="savingNewMode"
+              @click="saveCustomMode"
+            >
+              <Save :size="14" />
+              <span>{{ savingNewMode ? t('common.saving') : t('modes.btn_save_mode') }}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -4109,5 +4578,353 @@ onMounted(() => {
 .btn-text-xs:hover {
   background: #0284c7;
   color: #fff;
+}
+
+/* Routing Modes Styles */
+.badge-active-mode {
+  background: rgba(16, 185, 129, 0.2) !important;
+  color: #34d399 !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+
+.modes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  gap: 16px;
+}
+
+.mode-card {
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.mode-card:hover {
+  border-color: #334155;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.mode-card.mode-active {
+  border-color: #0284c7;
+  background: linear-gradient(180deg, rgba(2, 132, 199, 0.05) 0%, rgba(15, 23, 42, 0.8) 100%);
+  box-shadow: 0 0 0 1px rgba(2, 132, 199, 0.3), 0 4px 16px rgba(2, 132, 199, 0.1);
+}
+
+.mode-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mode-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mode-icon-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1e293b;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.mode-icon-avatar.gfwlist {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.mode-icon-avatar.bypass_cn {
+  background: rgba(2, 132, 199, 0.15);
+  color: #38bdf8;
+}
+
+.mode-icon-avatar.only_cn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.mode-icon-avatar.global {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+}
+
+.mode-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-name-row h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+}
+
+.mode-tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted, #94a3b8);
+}
+
+.badge-active-glow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #10b981;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.mode-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-apply-mode {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+.mode-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted, #94a3b8);
+}
+
+.mode-meta-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.rules-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rules-count-pill {
+  font-size: 11px;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: #0284c7;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-text-link:hover {
+  text-decoration: underline;
+}
+
+.btn-fast-test {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Fast Test Results Panel */
+.mode-test-panel {
+  border-top: 1px solid var(--border-color, #1e293b);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.test-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.test-panel-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-main, #f1f5f9);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.test-hint {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+}
+
+.test-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.test-item-row {
+  display: grid;
+  grid-template-columns: 100px 80px 1fr 60px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  transition: background 0.15s;
+}
+
+.test-item-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.target-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.target-name {
+  color: #f1f5f9;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.target-cat {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.badge-out {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-out.out-direct {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.badge-out.out-proxy {
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+}
+
+.badge-out.out-block {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.rule-col code {
+  font-size: 10.5px;
+  color: #94a3b8;
+  background: transparent;
+  padding: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.latency-col {
+  text-align: right;
+}
+
+.latency-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.latency-badge.fast {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.latency-badge.medium {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.latency-badge.slow {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.detail-col {
+  display: none;
+}
+
+/* Rules Table in Modal */
+.rules-table-container {
+  max-height: 55vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+}
+
+.rules-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.rules-table th {
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  text-align: left;
+  font-weight: 600;
+  color: #cbd5e1;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+}
+
+.rules-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rule-idx {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.rule-cond {
+  color: #f1f5f9;
 }
 </style>
