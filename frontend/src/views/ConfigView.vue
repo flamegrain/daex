@@ -28,6 +28,8 @@ import {
   CheckSquare,
   ArrowUp,
   ArrowDown,
+  ArrowLeft,
+  FileText,
   AlertTriangle,
   ShieldAlert,
   BookOpen,
@@ -43,6 +45,7 @@ import {
   Shield,
   Zap,
   Eye,
+  Flag,
   X
 } from 'lucide-vue-next'
 import {
@@ -72,6 +75,9 @@ interface ConfigProfile {
   name: string
   path: string
   isActive: boolean
+  note: string
+  rulesCount: number
+  nodesCount: number
   size: number
   modTime: string
 }
@@ -101,10 +107,30 @@ interface ConfigRouteRule {
   target: string
 }
 
+interface DnsUpstreamItem {
+  tag: string
+  address: string
+}
+
+interface DnsRequestRule {
+  condition: string
+  target: string
+}
+
+interface DnsConfig {
+  ipVersionPrefer: number
+  fixedDomainTTL: number
+  optimisticCache: boolean
+  upstreams: DnsUpstreamItem[]
+  requestRules: DnsRequestRule[]
+  fallback: string
+}
+
 interface DaeConfigModel {
   globals: Record<string, string>
   subscriptions: ConfigSubItem[]
   nodes: ConfigNodeItem[]
+  dns: DnsConfig
   groups: ConfigGroupItem[]
   routingRules: ConfigRouteRule[]
   rawDnsBlock: string
@@ -112,7 +138,7 @@ interface DaeConfigModel {
 }
 
 type Mode = 'form' | 'code'
-type FormSection = 'modes' | 'nodes' | 'groups' | 'routing' | 'global' | 'subscriptions'
+type FormSection = 'global' | 'subscriptions' | 'nodes' | 'dns' | 'groups' | 'routing' | 'modes'
 
 interface RoutingModeRule {
   condition: string
@@ -138,12 +164,14 @@ interface RoutingModeItem {
   description: string
   badge: string
   isCustom: boolean
+  dnsSettings?: DnsConfig
   rules: RoutingModeRule[]
   testResults: FastTestItem[]
 }
 
+const viewLevel = ref<'list' | 'detail'>('list')
 const currentMode = ref<Mode>('form')
-const activeSection = ref<FormSection>('modes')
+const activeSection = ref<FormSection>('global')
 
 const modesList = ref<RoutingModeItem[]>([])
 const activeModeId = ref('bypass_cn')
@@ -155,11 +183,26 @@ const showModeRulesModal = ref(false)
 const viewingMode = ref<RoutingModeItem | null>(null)
 
 const showNewModeModal = ref(false)
+const createModeStep = ref<1 | 2>(1)
 const newModeForm = ref({
+  id: '',
   name: '',
   description: '',
   badge: '自定义',
-  rulesText: 'pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct\ndip(224.0.0.0/3, "ff00::/8") -> direct\ndip(geoip:private) -> direct\nfallback: direct'
+  dnsSettings: {
+    ipVersionPrefer: 4,
+    fixedDomainTTL: 0,
+    optimisticCache: false,
+    upstreams: [
+      { tag: 'alidns', address: 'udp://223.5.5.5:53' },
+      { tag: 'googledns', address: 'tcp+udp://dns.google:53' }
+    ],
+    requestRules: [
+      { condition: 'qname(geosite:cn)', target: 'alidns' }
+    ],
+    fallback: 'googledns'
+  },
+  rulesText: 'pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct\ndip(224.0.0.0/3, "ff00::/8") -> direct\ndip(geoip:private) -> direct\ndomain(geosite:category-ads-all) -> block\ndomain(geosite:cn) -> direct\ndip(geoip:cn) -> direct\nfallback: proxy'
 })
 const savingNewMode = ref(false)
 
@@ -183,6 +226,19 @@ const configModel = ref<DaeConfigModel>({
   globals: {},
   subscriptions: [],
   nodes: [],
+  dns: {
+    ipVersionPrefer: 4,
+    fixedDomainTTL: 0,
+    optimisticCache: false,
+    upstreams: [
+      { tag: 'alidns', address: 'udp://223.5.5.5:53' },
+      { tag: 'googledns', address: 'tcp+udp://dns.google:53' }
+    ],
+    requestRules: [
+      { condition: 'qname(geosite:cn)', target: 'alidns' }
+    ],
+    fallback: 'googledns'
+  },
   groups: [],
   routingRules: [],
   rawDnsBlock: ''
@@ -211,7 +267,13 @@ const currentSelectedConfig = ref<string>('config.mock.dae')
 const activeRunningConfig = ref<string>('config.mock.dae')
 const showNewProfileModal = ref(false)
 const newProfileName = ref('')
+const newProfileNote = ref('')
 const activatingConfig = ref(false)
+
+const currentProfileNote = computed(() => {
+  const p = configProfiles.value.find(item => item.name === currentSelectedConfig.value)
+  return p?.note || ''
+})
 
 // Modal states for CRUD
 const showNodeModal = ref(false)
@@ -379,6 +441,19 @@ async function loadConfig(profileName?: string) {
         globals: m.globals || {},
         subscriptions: m.subscriptions || [],
         nodes: m.nodes || [],
+        dns: m.dns || {
+          ipVersionPrefer: 4,
+          fixedDomainTTL: 0,
+          optimisticCache: false,
+          upstreams: [
+            { tag: 'alidns', address: 'udp://223.5.5.5:53' },
+            { tag: 'googledns', address: 'tcp+udp://dns.google:53' }
+          ],
+          requestRules: [
+            { condition: 'qname(geosite:cn)', target: 'alidns' }
+          ],
+          fallback: 'googledns'
+        },
         groups: m.groups || [],
         routingRules: m.routingRules || [],
         rawDnsBlock: m.rawDnsBlock || '',
@@ -392,6 +467,74 @@ async function loadConfig(profileName?: string) {
   } finally {
     loading.value = false
   }
+}
+
+function openEditProfile(name: string) {
+  currentSelectedConfig.value = name
+  loadConfig(name)
+  activeSection.value = 'global'
+  viewLevel.value = 'detail'
+}
+
+function addDnsUpstream(tag?: string, address?: string) {
+  if (!configModel.value.dns) {
+    configModel.value.dns = {
+      ipVersionPrefer: 4,
+      fixedDomainTTL: 0,
+      optimisticCache: false,
+      upstreams: [],
+      requestRules: [],
+      fallback: ''
+    }
+  }
+  const newTag = tag || `dns_${configModel.value.dns.upstreams.length + 1}`
+  const newAddr = address || 'udp://223.5.5.5:53'
+  let finalTag = newTag
+  if (configModel.value.dns.upstreams.some(u => u.tag === finalTag)) {
+    finalTag = `${newTag}_${Date.now() % 1000}`
+  }
+  configModel.value.dns.upstreams.push({ tag: finalTag, address: newAddr })
+  if (!configModel.value.dns.fallback) {
+    configModel.value.dns.fallback = finalTag
+  }
+  isDirty.value = true
+}
+
+function removeDnsUpstream(index: number) {
+  if (!configModel.value.dns) return
+  const removed = configModel.value.dns.upstreams[index]
+  configModel.value.dns.upstreams.splice(index, 1)
+  if (configModel.value.dns.fallback === removed?.tag) {
+    configModel.value.dns.fallback = configModel.value.dns.upstreams[0]?.tag || ''
+  }
+  isDirty.value = true
+}
+
+function addDnsRequestRule(condition?: string, target?: string) {
+  if (!configModel.value.dns) return
+  const fallbackTarget = configModel.value.dns.upstreams[0]?.tag || 'alidns'
+  configModel.value.dns.requestRules.push({
+    condition: condition || 'qname(geosite:cn)',
+    target: target || fallbackTarget
+  })
+  isDirty.value = true
+}
+
+function removeDnsRequestRule(index: number) {
+  if (!configModel.value.dns) return
+  configModel.value.dns.requestRules.splice(index, 1)
+  isDirty.value = true
+}
+
+function moveDnsRequestRule(index: number, direction: 'up' | 'down') {
+  if (!configModel.value.dns) return
+  const rules = configModel.value.dns.requestRules
+  const targetIndex = direction === 'up' ? index - 1 : index + 1
+  if (targetIndex < 0 || targetIndex >= rules.length) return
+  const temp = rules[index]
+  rules[index] = rules[targetIndex]
+  rules[targetIndex] = temp
+  isDirty.value = true
 }
 
 async function handleSelectProfile(name: string) {
@@ -433,6 +576,7 @@ async function activateSelectedProfile(name?: string) {
 
 function openCreateProfileModal() {
   newProfileName.value = ''
+  newProfileNote.value = ''
   showNewProfileModal.value = true
 }
 
@@ -445,18 +589,19 @@ async function createNewProfile() {
   if (!name.endsWith('.dae')) {
     name += '.dae'
   }
+  const note = newProfileNote.value.trim()
   try {
     const res = await fetch('/api/configs/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, content: '' })
+      body: JSON.stringify({ name, note, content: '' })
     })
     const data = await res.json()
     if (res.ok) {
       showNewProfileModal.value = false
       alert(t('config.create_success', { name: data.name }))
       await fetchConfigProfiles()
-      await handleSelectProfile(data.name)
+      viewLevel.value = 'list'
     } else {
       alert(t('config.create_fail', { error: data.error || '', details: data.details || '' }))
     }
@@ -1246,16 +1391,39 @@ function openViewRules(mode: RoutingModeItem) {
 }
 
 function openNewModeModal() {
+  createModeStep.value = 1
   newModeForm.value = {
+    id: '',
     name: '',
     description: '',
     badge: '自定义',
-    rulesText: 'pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct\ndip(224.0.0.0/3, "ff00::/8") -> direct\ndip(geoip:private) -> direct\nfallback: direct'
+    dnsSettings: {
+      ipVersionPrefer: 4,
+      fixedDomainTTL: 0,
+      optimisticCache: false,
+      upstreams: [
+        { tag: 'alidns', address: 'udp://223.5.5.5:53' },
+        { tag: 'googledns', address: 'tcp+udp://dns.google:53' }
+      ],
+      requestRules: [
+        { condition: 'qname(geosite:cn)', target: 'alidns' }
+      ],
+      fallback: 'googledns'
+    },
+    rulesText: 'pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct\ndip(224.0.0.0/3, "ff00::/8") -> direct\ndip(geoip:private) -> direct\ndomain(geosite:category-ads-all) -> block\ndomain(geosite:cn) -> direct\ndip(geoip:cn) -> direct\nfallback: proxy'
   }
   showNewModeModal.value = true
 }
 
-async function saveCustomMode() {
+function proceedToModeConfigStep2() {
+  if (!newModeForm.value.name.trim()) {
+    alert(t('modes.new_name_label') + '不能为空')
+    return
+  }
+  createModeStep.value = 2
+}
+
+async function saveCustomMode(andActivate: boolean = false) {
   if (!newModeForm.value.name.trim()) {
     alert(t('modes.new_name_label') + '不能为空')
     return
@@ -1284,9 +1452,11 @@ async function saveCustomMode() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        id: newModeForm.value.id || undefined,
         name: newModeForm.value.name.trim(),
         description: newModeForm.value.description.trim(),
         badge: newModeForm.value.badge.trim() || '自定义',
+        dnsSettings: newModeForm.value.dnsSettings,
         rules
       })
     })
@@ -1294,6 +1464,26 @@ async function saveCustomMode() {
     if (res.ok && data.ok) {
       showNewModeModal.value = false
       await fetchModes()
+      if (andActivate) {
+        const created = modesList.value.find(m => m.id === data.id || m.name === newModeForm.value.name.trim())
+        if (created) {
+          await applyMode(created)
+        } else {
+          alert('模式已保存，正在应用...')
+          await applyMode({
+            id: data.id || 'custom',
+            name: newModeForm.value.name.trim(),
+            description: newModeForm.value.description.trim(),
+            badge: newModeForm.value.badge.trim(),
+            isCustom: true,
+            dnsSettings: newModeForm.value.dnsSettings,
+            rules,
+            testResults: []
+          })
+        }
+      } else {
+        alert(t('common.save') + '成功')
+      }
     } else {
       alert(data.error || '创建自定义模式失败')
     }
@@ -1316,571 +1506,678 @@ async function deleteCustomMode(mode: RoutingModeItem) {
   }
 }
 
-onMounted(() => {
-  loadConfig()
-  fetchModes()
+onMounted(async () => {
+  await fetchConfigProfiles()
+  if (configProfiles.value.length > 0) {
+    const active = configProfiles.value.find(p => p.isActive)
+    currentSelectedConfig.value = active ? active.name : configProfiles.value[0].name
+  }
+  await fetchModes()
 })
 </script>
 
 <template>
   <div class="config-view">
-    <!-- Top toolbar -->
-    <header class="toolbar">
-      <div class="toolbar-left">
-        <div class="mode-switcher">
-          <button
-            class="mode-btn"
-            :class="{ active: currentMode === 'form' }"
-            @click="switchMode('form')"
-          >
-            <LayoutGrid :size="14" />
-            <span>{{ t('config.mode.form') }}</span>
+    <!-- LEVEL 1: Configuration Profiles List View (默认展示) -->
+    <div v-if="viewLevel === 'list'" class="profiles-list-view">
+      <header class="profiles-header">
+        <div class="header-left">
+          <div class="header-icon-wrap">
+            <Files :size="24" class="text-primary" />
+          </div>
+          <div>
+            <h2 class="profiles-title">{{ t('config.profiles_title') }}</h2>
+            <p class="profiles-subtitle">{{ t('config.profiles_subtitle') }}</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary" @click="openCreateProfileModal">
+            <Plus :size="15" />
+            <span>{{ t('config.btn_new_profile') }}</span>
           </button>
-          <button
-            class="mode-btn"
-            :class="{ active: currentMode === 'code' }"
-            @click="switchMode('code')"
-          >
-            <Code :size="14" />
-            <span>{{ t('config.mode.code') }}</span>
+          <button class="btn btn-secondary" @click="openBackupManager" :title="t('config.backup_btn')">
+            <Archive :size="15" />
+            <span>{{ t('config.backup_btn') }}</span>
           </button>
         </div>
+      </header>
 
-        <!-- Config Profile Selector -->
-        <div class="profile-selector-group">
-          <div class="profile-select-wrapper">
-            <Files class="icon text-muted" :size="14" />
-            <select
-              :value="currentSelectedConfig"
-              @change="handleSelectProfile(($event.target as HTMLSelectElement).value)"
-              class="profile-select"
-              :title="t('config.switch_profile')"
+      <div class="profiles-table-container">
+        <table class="profiles-table">
+          <thead>
+            <tr>
+              <th style="min-width: 200px">{{ t('config.col_profile_name') }}</th>
+              <th style="min-width: 240px">{{ t('config.col_profile_note') }}</th>
+              <th style="width: 120px">{{ t('config.col_profile_rules') }}</th>
+              <th style="width: 120px">{{ t('config.col_profile_nodes') }}</th>
+              <th style="width: 170px">{{ t('config.col_profile_mod') }}</th>
+              <th style="width: 120px">{{ t('config.col_profile_status') }}</th>
+              <th style="width: 220px; text-align: right">{{ t('config.col_profile_action') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="p in configProfiles"
+              :key="p.name"
+              :class="{ 'row-active': p.isActive }"
+              @dblclick="openEditProfile(p.name)"
             >
-              <option
-                v-for="p in configProfiles"
-                :key="p.name"
-                :value="p.name"
-              >
-                {{ p.name }} {{ p.isActive ? ` [${t('common.active')}]` : '' }}
-              </option>
-            </select>
-            <span v-if="isDirty" class="dirty-dot">●</span>
+              <td class="profile-name-cell">
+                <div class="profile-name-wrap">
+                  <FileCode :size="16" class="text-info" />
+                  <span class="profile-filename font-bold">{{ p.name }}</span>
+                </div>
+              </td>
+              <td class="profile-note-cell">
+                <span class="profile-note-text text-muted">{{ p.note || '-' }}</span>
+              </td>
+              <td>
+                <span class="badge-count">{{ p.rulesCount || 0 }} 条</span>
+              </td>
+              <td>
+                <span class="badge-count">{{ p.nodesCount || 0 }} 个</span>
+              </td>
+              <td class="text-muted text-xs mono">
+                {{ formatDate(p.modTime) }}
+              </td>
+              <td>
+                <span v-if="p.isActive" class="badge-active-prominent">
+                  <CheckCircle2 :size="13" />
+                  <span>{{ t('config.status_active') }}</span>
+                </span>
+                <span v-else class="badge-inactive">
+                  {{ t('config.status_inactive') }}
+                </span>
+              </td>
+              <td style="text-align: right" class="profile-action-cell">
+                <button
+                  class="btn btn-primary btn-sm btn-edit-profile"
+                  @click="openEditProfile(p.name)"
+                  :title="t('config.action_edit')"
+                >
+                  <Edit2 :size="13" />
+                  <span>{{ t('config.action_edit') }}</span>
+                </button>
+                <button
+                  v-if="!p.isActive"
+                  class="btn btn-secondary btn-sm btn-activate-profile"
+                  :disabled="activatingConfig"
+                  @click="activateSelectedProfile(p.name)"
+                  :title="t('config.action_activate')"
+                >
+                  <Check :size="13" />
+                  <span>{{ t('config.action_activate') }}</span>
+                </button>
+                <button
+                  class="btn-icon-subtle"
+                  @click="currentSelectedConfig = p.name; openCopyProfileModal()"
+                  :title="t('common.copy')"
+                >
+                  <Copy :size="13" />
+                </button>
+                <button
+                  v-if="!p.isActive"
+                  class="btn-icon-subtle danger"
+                  @click="deleteProfile(p.name)"
+                  :title="t('common.delete')"
+                >
+                  <Trash2 :size="13" />
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- LEVEL 2: Configuration Detail Editor View (配置文件各模块配置) -->
+    <div v-else class="profile-detail-view">
+      <!-- Top toolbar -->
+      <header class="toolbar">
+        <div class="toolbar-left">
+          <button
+            class="btn btn-secondary btn-sm btn-back"
+            @click="viewLevel = 'list'"
+            :title="t('config.btn_back_to_profiles')"
+          >
+            <ArrowLeft :size="14" />
+            <span>{{ t('config.btn_back_to_profiles') }}</span>
+          </button>
+
+          <div class="mode-switcher">
+            <button
+              class="mode-btn"
+              :class="{ active: currentMode === 'form' }"
+              @click="switchMode('form')"
+            >
+              <LayoutGrid :size="14" />
+              <span>{{ t('config.mode.form') }}</span>
+            </button>
+            <button
+              class="mode-btn"
+              :class="{ active: currentMode === 'code' }"
+              @click="switchMode('code')"
+            >
+              <Code :size="14" />
+              <span>{{ t('config.mode.code') }}</span>
+            </button>
           </div>
 
-          <!-- 生效状态标签 / 一键生效按钮 -->
+          <!-- Current Profile Info Pill -->
+          <div class="profile-current-pill">
+            <Files :size="14" class="text-primary mr-1" />
+            <span class="profile-current-name">{{ currentSelectedConfig }}</span>
+            <span v-if="currentProfileNote" class="profile-note-pill">{{ currentProfileNote }}</span>
+            <span v-if="isDirty" class="dirty-dot" title="有未保存的改动">●</span>
+          </div>
+
+          <!-- Active badge or Activate button -->
           <span
             v-if="currentSelectedConfig === activeRunningConfig"
-            class="badge-active"
+            class="badge-active-prominent ml-2"
           >
-            <span class="active-indicator"></span>{{ t('common.active') }}
+            <CheckCircle2 :size="13" />
+            <span>{{ t('config.status_active') }}</span>
           </span>
           <button
             v-else
-            class="btn btn-sm btn-activate"
+            class="btn btn-sm btn-activate ml-2"
             :disabled="activatingConfig"
             @click="activateSelectedProfile(currentSelectedConfig)"
             :title="t('config.activate_btn')"
           >
             <Check :size="13" />
-            <span>{{ activatingConfig ? t('config.activating') : t('config.activate_btn') }}</span>
-          </button>
-
-          <!-- 新建与删除按钮 -->
-          <button
-            class="btn-icon-subtle"
-            @click="openCreateProfileModal"
-            :title="t('common.add')"
-          >
-            <Plus :size="14" />
-          </button>
-
-          <button
-            class="btn-icon-subtle"
-            @click="openCopyProfileModal"
-            :title="t('common.copy')"
-          >
-            <Copy :size="14" />
-          </button>
-
-          <button
-            v-if="currentSelectedConfig !== activeRunningConfig"
-            class="btn-icon-subtle danger"
-            @click="deleteProfile(currentSelectedConfig)"
-            :title="t('common.delete')"
-          >
-            <Trash2 :size="14" />
-          </button>
-        </div>
-      </div>
-
-      <div class="toolbar-actions">
-        <!-- Validation trigger -->
-        <button
-          class="btn btn-secondary"
-          :disabled="validating"
-          @click="validateContent(configContent, true)"
-          :title="t('config.validate_btn')"
-        >
-          <ShieldCheck class="icon" :size="15" />
-          <span>{{ validating ? t('config.validating') : t('config.validate_btn') }}</span>
-        </button>
-
-        <!-- Import / Export -->
-        <input
-          ref="fileInput"
-          type="file"
-          accept=".dae,.conf,.txt"
-          class="hidden"
-          @change="handleFileSelect"
-        />
-        <button class="btn btn-secondary" @click="triggerImport" :title="t('common.restore')">
-          <Upload class="icon" :size="15" />
-          <span>{{ t('common.restore') }}</span>
-        </button>
-
-        <button class="btn btn-secondary" @click="exportConfig" :title="t('common.download')">
-          <Download class="icon" :size="15" />
-          <span>{{ t('common.download') }}</span>
-        </button>
-
-        <button class="btn btn-secondary" @click="openBackupManager" :title="t('config.backup_btn')">
-          <Archive class="icon" :size="15" />
-          <span>{{ t('config.backup_btn') }}</span>
-        </button>
-
-        <div class="divider"></div>
-
-        <label class="checkbox-label" :title="t('config.reload_switch')">
-          <input type="checkbox" v-model="reloadAfterSave" />
-          <span>{{ t('config.reload_switch') }}</span>
-        </label>
-
-        <!-- Save Button -->
-        <button class="btn btn-primary" :disabled="saving" @click="saveConfig">
-          <Save class="icon" :size="15" />
-          <span>{{ saving ? t('config.saving') : t('config.save_btn') }}</span>
-        </button>
-      </div>
-    </header>
-
-    <!-- Main Workspace Area -->
-    <div class="workspace-area">
-      <!-- 1. Visual Form Mode -->
-      <div v-if="currentMode === 'form'" class="form-mode-container">
-        <!-- Sub-navigation tabs for form sections -->
-        <div class="form-subnav">
-          <button
-            class="subnav-item"
-            :class="{ active: activeSection === 'modes' }"
-            @click="activeSection = 'modes'"
-          >
-            <Compass :size="15" />
-            <span>{{ t('config.section.modes') }}</span>
-            <span class="count-pill badge-active-mode">{{ getActiveModeBadge() }}</span>
-          </button>
-          <button
-            class="subnav-item"
-            :class="{ active: activeSection === 'nodes' }"
-            @click="activeSection = 'nodes'"
-          >
-            <Server :size="15" />
-            <span>{{ t('config.section.nodes') }}</span>
-            <span class="count-pill">{{ configModel.nodes.length }}</span>
-          </button>
-          <button
-            class="subnav-item"
-            :class="{ active: activeSection === 'groups' }"
-            @click="activeSection = 'groups'"
-          >
-            <Layers :size="15" />
-            <span>{{ t('config.section.groups') }}</span>
-            <span class="count-pill">{{ configModel.groups.length }}</span>
-          </button>
-          <button
-            class="subnav-item"
-            :class="{ active: activeSection === 'routing' }"
-            @click="activeSection = 'routing'"
-          >
-            <GitFork :size="15" />
-            <span>{{ t('config.section.routing') }}</span>
-            <span class="count-pill">{{ configModel.routingRules.length }}</span>
-          </button>
-          <button
-            class="subnav-item"
-            :class="{ active: activeSection === 'global' }"
-            @click="activeSection = 'global'"
-          >
-            <Sliders :size="15" />
-            <span>{{ t('config.section.global') }}</span>
-          </button>
-          <button
-            class="subnav-item"
-            :class="{ active: activeSection === 'subscriptions' }"
-            @click="activeSection = 'subscriptions'"
-          >
-            <Download :size="15" />
-            <span>{{ t('config.section.subscriptions') }}</span>
-            <span class="count-pill">{{ configModel.subscriptions.length }}</span>
+            <span>{{ activatingConfig ? t('config.action_activating') : t('config.action_activate') }}</span>
           </button>
         </div>
 
-        <!-- Section 0: Routing Modes -->
-        <div v-if="activeSection === 'modes'" class="form-section-body">
-          <div class="section-title-bar">
-            <div>
-              <h3>{{ t('modes.title') }}</h3>
-              <p>{{ t('modes.subtitle') }}</p>
-            </div>
-            <button class="btn btn-primary" @click="openNewModeModal">
-              <Plus :size="14" /> {{ t('modes.btn_new') }}
-            </button>
-          </div>
+        <div class="toolbar-actions">
+          <!-- Validation trigger -->
+          <button
+            class="btn btn-secondary"
+            :disabled="validating"
+            @click="validateContent(configContent, true)"
+            :title="t('config.validate_btn')"
+          >
+            <ShieldCheck class="icon" :size="15" />
+            <span>{{ validating ? t('config.validating') : t('config.validate_btn') }}</span>
+          </button>
 
-          <!-- Modes Cards Grid -->
-          <div class="modes-grid">
-            <div
-              v-for="mode in modesList"
-              :key="mode.id"
-              class="mode-card"
-              :class="{ 'mode-active': mode.id === activeModeId }"
+          <!-- Import / Export -->
+          <input
+            ref="fileInput"
+            type="file"
+            accept=".dae,.conf,.txt"
+            class="hidden"
+            @change="handleFileSelect"
+          />
+          <button class="btn btn-secondary" @click="triggerImport" :title="t('common.restore')">
+            <Upload class="icon" :size="15" />
+            <span>{{ t('common.restore') }}</span>
+          </button>
+
+          <button class="btn btn-secondary" @click="exportConfig" :title="t('common.download')">
+            <Download class="icon" :size="15" />
+            <span>{{ t('common.download') }}</span>
+          </button>
+
+          <button class="btn btn-secondary" @click="openBackupManager" :title="t('config.backup_btn')">
+            <Archive class="icon" :size="15" />
+            <span>{{ t('config.backup_btn') }}</span>
+          </button>
+
+          <div class="divider"></div>
+
+          <label class="checkbox-label" :title="t('config.reload_switch')">
+            <input type="checkbox" v-model="reloadAfterSave" />
+            <span>{{ t('config.reload_switch') }}</span>
+          </label>
+
+          <!-- Save Button -->
+          <button class="btn btn-primary" :disabled="saving" @click="saveConfig">
+            <Save class="icon" :size="15" />
+            <span>{{ saving ? t('config.saving') : t('config.save_btn') }}</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Workspace Area -->
+      <div class="workspace-area">
+        <!-- 1. Visual Form Mode -->
+        <div v-if="currentMode === 'form'" class="form-mode-container">
+          <!-- Sub-navigation tabs: strictly following official example.dae order -->
+          <div class="form-subnav">
+            <!-- 1. Global -->
+            <button
+              class="subnav-item"
+              :class="{ active: activeSection === 'global' }"
+              @click="activeSection = 'global'"
             >
-              <!-- Card Top -->
-              <div class="mode-card-header">
-                <div class="mode-title-wrap">
-                  <div class="mode-icon-avatar" :class="mode.id">
-                    <Shield v-if="mode.id === 'gfwlist'" :size="20" />
-                    <Compass v-else-if="mode.id === 'bypass_cn'" :size="20" />
-                    <Flag v-else-if="mode.id === 'only_cn'" :size="20" />
-                    <Globe v-else-if="mode.id === 'global'" :size="20" />
-                    <Sliders v-else :size="20" />
-                  </div>
-                  <div>
-                    <div class="mode-name-row">
-                      <h4>{{ mode.name }}</h4>
-                      <span class="mode-tag">{{ mode.badge }}</span>
-                    </div>
-                    <span v-if="mode.id === activeModeId" class="badge-active-glow">
-                      <Check :size="12" /> {{ t('modes.active_badge') }}
-                    </span>
-                  </div>
-                </div>
+              <Sliders :size="15" />
+              <span>{{ t('config.tab_global') }}</span>
+            </button>
 
-                <div class="mode-actions">
-                  <button
-                    v-if="mode.id !== activeModeId"
-                    class="btn btn-primary btn-sm btn-apply-mode"
-                    :disabled="applyingModeId === mode.id"
-                    @click="applyMode(mode)"
-                  >
-                    <Check v-if="applyingModeId !== mode.id" :size="13" />
-                    <RefreshCw v-else :size="13" class="spin" />
-                    <span>{{ applyingModeId === mode.id ? t('modes.applying') : t('modes.apply_btn') }}</span>
-                  </button>
-                  <button
-                    v-if="mode.isCustom"
-                    class="btn-icon-subtle danger"
-                    @click="deleteCustomMode(mode)"
-                    :title="t('common.delete')"
-                  >
-                    <Trash2 :size="13" />
-                  </button>
-                </div>
-              </div>
+            <!-- 2. Subscriptions -->
+            <button
+              class="subnav-item"
+              :class="{ active: activeSection === 'subscriptions' }"
+              @click="activeSection = 'subscriptions'"
+            >
+              <Download :size="15" />
+              <span>{{ t('config.tab_subscriptions') }}</span>
+              <span class="count-pill">{{ configModel.subscriptions.length }}</span>
+            </button>
 
-              <!-- Card Body / Desc -->
-              <p class="mode-desc">{{ mode.description }}</p>
+            <!-- 3. Nodes -->
+            <button
+              class="subnav-item"
+              :class="{ active: activeSection === 'nodes' }"
+              @click="activeSection = 'nodes'"
+            >
+              <Server :size="15" />
+              <span>{{ t('config.tab_nodes') }}</span>
+              <span class="count-pill">{{ configModel.nodes.length }}</span>
+            </button>
 
-              <!-- Rules & Toolbar preview -->
-              <div class="mode-meta-bar">
-                <div class="rules-info">
-                  <span class="rules-count-pill">{{ mode.rules.length }} 条分流规则</span>
-                  <button class="btn-text-link" @click="openViewRules(mode)">
-                    <Eye :size="13" />
-                    <span>{{ t('modes.view_rules', { count: mode.rules.length }) }}</span>
-                  </button>
-                </div>
-                <button
-                  class="btn btn-secondary btn-xs btn-fast-test"
-                  :disabled="testingModeId === mode.id"
-                  @click="runFastTestForMode(mode.id)"
-                >
-                  <Zap :size="12" :class="{ 'text-warning': testingModeId !== mode.id, spin: testingModeId === mode.id }" />
-                  <span>{{ testingModeId === mode.id ? t('modes.fast_testing') : t('modes.fast_test') }}</span>
-                </button>
-              </div>
+            <!-- 4. DNS Settings -->
+            <button
+              class="subnav-item"
+              :class="{ active: activeSection === 'dns' }"
+              @click="activeSection = 'dns'"
+            >
+              <Globe :size="15" />
+              <span>{{ t('config.tab_dns') }}</span>
+              <span class="count-pill">{{ configModel.dns?.upstreams?.length || 0 }}</span>
+            </button>
 
-              <!-- Fast Test Results Panel -->
-              <div class="mode-test-panel">
-                <div class="test-panel-header">
-                  <span class="test-panel-title">
-                    <Zap :size="13" class="text-warning" />
-                    {{ t('modes.test_panel_title') }}
-                  </span>
-                  <span class="test-hint">{{ t('modes.test_panel_desc') }}</span>
-                </div>
-                <div class="test-items-list">
-                  <div
-                    v-for="item in mode.testResults"
-                    :key="item.id"
-                    class="test-item-row"
-                  >
-                    <div class="item-col target-col">
-                      <span class="target-name">{{ item.name }}</span>
-                      <span class="target-cat">{{ item.category }}</span>
-                    </div>
+            <!-- 5. Groups -->
+            <button
+              class="subnav-item"
+              :class="{ active: activeSection === 'groups' }"
+              @click="activeSection = 'groups'"
+            >
+              <Layers :size="15" />
+              <span>{{ t('config.tab_groups') }}</span>
+              <span class="count-pill">{{ configModel.groups.length }}</span>
+            </button>
 
-                    <div class="item-col out-col">
-                      <span
-                        class="badge-out"
-                        :class="{
-                          'out-direct': item.expectedOut.includes('direct') || item.expectedOut.includes('直连'),
-                          'out-proxy': item.expectedOut.includes('proxy') || item.expectedOut.includes('代理'),
-                          'out-block': item.expectedOut.includes('block') || item.expectedOut.includes('阻断')
-                        }"
-                      >
-                        {{ item.expectedOut }}
-                      </span>
-                    </div>
+            <!-- 6. Routing Rules -->
+            <button
+              class="subnav-item"
+              :class="{ active: activeSection === 'routing' }"
+              @click="activeSection = 'routing'"
+            >
+              <GitFork :size="15" />
+              <span>{{ t('config.tab_routing') }}</span>
+              <span class="count-pill">{{ configModel.routingRules.length }}</span>
+            </button>
 
-                    <div class="item-col rule-col" :title="item.matchedRule">
-                      <code>{{ item.matchedRule }}</code>
-                    </div>
-
-                    <div class="item-col latency-col">
-                      <span class="latency-badge" :class="item.latency < 40 ? 'fast' : (item.latency < 90 ? 'medium' : 'slow')">
-                        {{ item.latency }} ms
-                      </span>
-                    </div>
-
-                    <div class="item-col detail-col" :title="item.message">
-                      <span class="detail-text">{{ item.message }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 1: Nodes -->
-        <div v-if="activeSection === 'nodes'" class="form-section-body">
-          <div class="section-title-bar">
-            <div>
-              <h3>{{ t('config.section.nodes') }}</h3>
-              <p>{{ t('config.nodes_desc') }}</p>
-            </div>
-            <button class="btn btn-primary" @click="openAddNode">
-              <Plus :size="14" /> {{ t('config.new_node') }}
+            <!-- 7. Routing Modes (Linked DNS + Rules Collection) -->
+            <button
+              class="subnav-item"
+              :class="{ active: activeSection === 'modes' }"
+              @click="activeSection = 'modes'"
+            >
+              <Compass :size="15" />
+              <span>{{ t('config.tab_modes') }}</span>
+              <span class="count-pill badge-active-mode">{{ getActiveModeBadge() }}</span>
             </button>
           </div>
 
-          <div v-if="configModel.nodes.length === 0" class="empty-state-box">
-            <Server class="empty-icon" :size="36" />
-            <div class="empty-text">{{ t('config.nodes_empty') }}</div>
-            <p class="empty-subtext">{{ t('config.nodes_empty_sub') }}</p>
-            <button class="btn btn-primary btn-sm" @click="openAddNode">
-              <Plus :size="13" /> {{ t('config.new_node') }}
-            </button>
-          </div>
-
-          <div v-else class="cards-grid">
-            <div v-for="node in configModel.nodes" :key="node.key" class="item-card">
-              <div class="card-top">
-                <span class="proto-badge">{{ node.protocol || 'NODE' }}</span>
-                <span class="card-key">{{ node.key }}</span>
-                <div class="card-actions">
-                  <button class="btn-icon" @click="openEditNode(node)" :title="t('common.edit')">
-                    <Edit2 :size="13" />
-                  </button>
-                  <button class="btn-icon delete" @click="deleteNode(node.key)" :title="t('common.delete')">
-                    <Trash2 :size="13" />
-                  </button>
-                </div>
+          <!-- Section 1: Global Parameters (按官方文档第一项) -->
+          <div v-if="activeSection === 'global'" class="form-section-body">
+            <div class="section-title-bar">
+              <div>
+                <h3>{{ t('config.section.global') }}</h3>
+                <p>{{ t('config.global_desc') }}</p>
               </div>
-              <div class="card-info">
-                <div class="row">
-                  <span class="lbl">{{ t('config.node_alias') }}:</span>
-                  <span class="val bold truncate" :title="node.name">{{ node.name || node.key }}</span>
-                </div>
-                <div class="row">
-                  <span class="lbl">{{ t('config.node_target') }}:</span>
-                  <span class="val mono truncate" :title="`${node.address}:${node.port}`">{{ node.address }}:{{ node.port }}</span>
-                </div>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-group">
+                <label>{{ t('config.field.global_log_level') }}</label>
+                <select v-model="configModel.globals['log_level']" @change="isDirty = true">
+                  <option value="trace">trace</option>
+                  <option value="debug">debug</option>
+                  <option value="info">info</option>
+                  <option value="warn">warn</option>
+                  <option value="error">error</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>dial_mode</label>
+                <select v-model="configModel.globals['dial_mode']" @change="isDirty = true">
+                  <option value="domain">domain</option>
+                  <option value="ip">ip</option>
+                  <option value="domain+">domain+</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>{{ t('config.field.global_lan_iface') }}</label>
+                <input v-model="configModel.globals['lan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_lan_iface_ph')" />
+              </div>
+
+              <div class="form-group">
+                <label>{{ t('config.field.global_wan_iface') }}</label>
+                <input v-model="configModel.globals['wan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_wan_iface_ph')" />
+              </div>
+
+              <div class="form-group">
+                <label>{{ t('config.field.global_tproxy_port') }}</label>
+                <input v-model="configModel.globals['tproxy_port']" @input="isDirty = true" :placeholder="t('config.field.global_tproxy_port_ph')" />
+              </div>
+
+              <div class="form-group">
+                <label>{{ t('config.field.global_tcp_check_url') }}</label>
+                <input v-model="configModel.globals['tcp_check_url']" @input="isDirty = true" :placeholder="t('config.field.global_tcp_check_url_ph')" />
+              </div>
+
+              <div class="form-group">
+                <label>check_interval</label>
+                <input v-model="configModel.globals['check_interval']" @input="isDirty = true" placeholder="30s" />
+              </div>
+
+              <div class="form-group">
+                <label>allow_insecure</label>
+                <select v-model="configModel.globals['allow_insecure']" @change="isDirty = true">
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Section 2: Groups -->
-        <div v-else-if="activeSection === 'groups'" class="form-section-body">
-          <div class="section-title-bar">
-            <div>
-              <h3>{{ t('config.section.groups') }}</h3>
-              <p>{{ t('config.groups_desc') }}</p>
-            </div>
-            <button class="btn btn-primary" @click="openAddGroup">
-              <Plus :size="14" /> {{ t('config.new_group') }}
-            </button>
-          </div>
-
-          <div v-if="configModel.groups.length === 0" class="empty-state-box">
-            <Layers class="empty-icon" :size="36" />
-            <div class="empty-text">{{ t('config.groups_empty') }}</div>
-            <p class="empty-subtext">{{ t('config.groups_empty_sub') }}</p>
-            <button class="btn btn-primary btn-sm" @click="openAddGroup">
-              <Plus :size="13" /> {{ t('config.new_group') }}
-            </button>
-          </div>
-
-          <div v-else class="cards-grid">
-            <div v-for="group in configModel.groups" :key="group.name" class="item-card group-card">
-              <div class="card-top">
-                <span class="group-badge">Group</span>
-                <span class="card-key">{{ group.name }}</span>
-                <div class="card-actions">
-                  <button class="btn-icon" @click="openEditGroup(group)" :title="t('common.edit')">
-                    <Edit2 :size="13" />
-                  </button>
-                  <button class="btn-icon delete" @click="deleteGroup(group.name)" :title="t('common.delete')">
-                    <Trash2 :size="13" />
-                  </button>
-                </div>
+          <!-- Section 2: Subscriptions (按官方文档第二项) -->
+          <div v-else-if="activeSection === 'subscriptions'" class="form-section-body">
+            <div class="section-title-bar">
+              <div>
+                <h3>{{ t('config.section.subscriptions') }}</h3>
+                <p>{{ t('config.sub_desc') }}</p>
               </div>
-              <div class="card-info">
-                <div class="row">
-                  <span class="lbl">{{ t('config.field.group_policy') }}:</span>
-                  <span class="val code-tag">{{ group.policy || 'default' }}</span>
-                </div>
-                <div class="filter-list">
-                  <span class="lbl">{{ t('config.field.group_filters') }}:</span>
-                  <div class="chips-wrap">
-                    <span v-for="(f, i) in group.filters" :key="i" class="filter-chip">
-                      {{ f }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 3: Routing -->
-        <div v-else-if="activeSection === 'routing'" class="form-section-body">
-          <div class="section-title-bar">
-            <div>
-              <div class="title-with-badge">
-                <h3>{{ t('config.section.routing') }}</h3>
-                <span
-                  v-if="routingHealthReport.hasErrors"
-                  class="health-badge danger"
-                >
-                  <ShieldAlert :size="12" /> {{ routingHealthReport.conflicts.filter(c => c.severity === 'error').length }}
-                </span>
-                <span
-                  v-else-if="routingHealthReport.hasWarnings"
-                  class="health-badge warning"
-                >
-                  <AlertTriangle :size="12" /> {{ routingHealthReport.conflicts.filter(c => c.severity === 'warning').length }}
-                </span>
-                <span
-                  v-else-if="configModel.routingRules.length > 0"
-                  class="health-badge success"
-                >
-                  <ShieldCheck :size="12" />
-                </span>
-              </div>
-              <p>{{ t('config.rules_desc') }}</p>
-            </div>
-            <div class="title-actions">
-              <button class="btn btn-primary" @click="openAddRoute">
-                <Plus :size="14" /> {{ t('config.new_rule') }}
+              <button class="btn btn-primary" @click="openAddSub">
+                <Plus :size="14" /> {{ t('config.new_sub') }}
               </button>
             </div>
+
+            <div v-if="configModel.subscriptions.length === 0" class="empty-state-box">
+              <Download class="empty-icon" :size="36" />
+              <div class="empty-text">{{ t('config.sub_empty') }}</div>
+              <p class="empty-subtext">{{ t('config.sub_empty_desc') }}</p>
+              <button class="btn btn-primary btn-sm" @click="openAddSub">
+                <Plus :size="13" /> {{ t('config.new_sub') }}
+              </button>
+            </div>
+
+            <div v-else class="cards-grid">
+              <div v-for="sub in configModel.subscriptions" :key="sub.tag" class="item-card">
+                <div class="card-top">
+                  <span class="sub-badge">Sub</span>
+                  <span class="card-key">{{ sub.tag }}</span>
+                  <div class="card-actions">
+                    <button class="btn-sub-fetch" @click="fetchSubNodes(sub)" :title="t('config.btn_fetch_nodes_tip')">
+                      <ListFilter :size="13" /> {{ t('config.btn_fetch_nodes') }}
+                    </button>
+                    <button class="btn-icon delete" @click="deleteSub(sub.tag)" :title="t('common.delete')">
+                      <Trash2 :size="13" />
+                    </button>
+                  </div>
+                </div>
+                <div class="card-info">
+                  <div class="row">
+                    <span class="lbl">URL:</span>
+                    <span class="val mono truncate" :title="sub.url">{{ sub.url }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <!-- Conflict & Health Diagnostic Panel -->
-          <div v-if="configModel.routingRules.length > 0" class="conflict-panel-wrap">
-            <!-- Case 1: Healthy banner -->
-            <div v-if="!routingHealthReport.hasErrors && !routingHealthReport.hasWarnings && routingHealthReport.conflicts.length === 0" class="health-summary-banner success">
-              <ShieldCheck class="banner-icon" :size="18" />
-              <div class="banner-text">
-                <span class="banner-title">{{ t('routing.conflict_healthy') }}</span>
-                <span class="banner-sub">{{ t('routing.health_ok_desc', { count: configModel.routingRules.length }) }}</span>
+          <!-- Section 3: Nodes (按官方文档第三项) -->
+          <div v-else-if="activeSection === 'nodes'" class="form-section-body">
+            <div class="section-title-bar">
+              <div>
+                <h3>{{ t('config.section.nodes') }}</h3>
+                <p>{{ t('config.nodes_desc') }}</p>
+              </div>
+              <button class="btn btn-primary" @click="openAddNode">
+                <Plus :size="14" /> {{ t('config.new_node') }}
+              </button>
+            </div>
+
+            <div v-if="configModel.nodes.length === 0" class="empty-state-box">
+              <Server class="empty-icon" :size="36" />
+              <div class="empty-text">{{ t('config.nodes_empty') }}</div>
+              <p class="empty-subtext">{{ t('config.nodes_empty_sub') }}</p>
+              <button class="btn btn-primary btn-sm" @click="openAddNode">
+                <Plus :size="13" /> {{ t('config.new_node') }}
+              </button>
+            </div>
+
+            <div v-else class="cards-grid">
+              <div v-for="node in configModel.nodes" :key="node.key" class="item-card">
+                <div class="card-top">
+                  <span class="proto-badge">{{ node.protocol || 'NODE' }}</span>
+                  <span class="card-key">{{ node.key }}</span>
+                  <div class="card-actions">
+                    <button class="btn-icon" @click="openEditNode(node)" :title="t('common.edit')">
+                      <Edit2 :size="13" />
+                    </button>
+                    <button class="btn-icon delete" @click="deleteNode(node.key)" :title="t('common.delete')">
+                      <Trash2 :size="13" />
+                    </button>
+                  </div>
+                </div>
+                <div class="card-info">
+                  <div class="row">
+                    <span class="lbl">{{ t('config.node_alias') }}:</span>
+                    <span class="val bold truncate" :title="node.name">{{ node.name || node.key }}</span>
+                  </div>
+                  <div class="row">
+                    <span class="lbl">{{ t('config.node_target') }}:</span>
+                    <span class="val mono truncate" :title="`${node.address}:${node.port}`">{{ node.address }}:{{ node.port }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: DNS Settings (官方文档第四项补全) -->
+          <div v-else-if="activeSection === 'dns'" class="form-section-body">
+            <div class="section-title-bar">
+              <div>
+                <h3>{{ t('dns.title') }}</h3>
+                <p>{{ t('dns.subtitle') }}</p>
+              </div>
+              <button class="btn btn-primary" @click="addDnsUpstream()">
+                <Plus :size="14" /> {{ t('dns.btn_add_upstream') }}
+              </button>
+            </div>
+
+            <!-- DNS Global Parameters -->
+            <div class="dns-panel-box mb-4">
+              <h4 class="dns-panel-title">
+                <Sliders :size="14" class="text-primary mr-1" />
+                {{ t('dns.options_title') }}
+              </h4>
+              <div class="form-grid-3">
+                <div class="form-group">
+                  <label>{{ t('dns.ipversion_prefer') }}</label>
+                  <select v-model.number="configModel.dns.ipVersionPrefer" @change="isDirty = true">
+                    <option :value="4">{{ t('dns.ipversion_v4') }}</option>
+                    <option :value="6">{{ t('dns.ipversion_v6') }}</option>
+                    <option :value="0">{{ t('dns.ipversion_auto') }}</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label>{{ t('dns.fixed_ttl') }}</label>
+                  <input
+                    type="number"
+                    v-model.number="configModel.dns.fixedDomainTTL"
+                    @input="isDirty = true"
+                    :placeholder="t('dns.fixed_ttl_ph')"
+                    min="0"
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label>{{ t('dns.fallback_upstream') }}</label>
+                  <select v-model="configModel.dns.fallback" @change="isDirty = true">
+                    <option v-for="u in configModel.dns.upstreams" :key="u.tag" :value="u.tag">
+                      {{ u.tag }} ({{ u.address }})
+                    </option>
+                  </select>
+                  <span class="field-hint">{{ t('dns.fallback_desc') }}</span>
+                </div>
+              </div>
+
+              <div class="optimistic-cache-row mt-2">
+                <label class="checkbox-label" :title="t('dns.optimistic_cache_desc')">
+                  <input type="checkbox" v-model="configModel.dns.optimisticCache" @change="isDirty = true" />
+                  <span class="bold">{{ t('dns.optimistic_cache') }}</span>
+                </label>
+                <p class="text-xs text-muted mt-1">{{ t('dns.optimistic_cache_desc') }}</p>
               </div>
             </div>
 
-            <!-- Case 2: Conflicts or optimization suggestions -->
-            <div v-else class="conflict-card" :class="{ 'has-error': routingHealthReport.hasErrors }">
-              <div class="conflict-card-header" @click="showConflictDetails = !showConflictDetails">
-                <div class="header-left">
-                  <ShieldAlert v-if="routingHealthReport.hasErrors" class="status-icon danger" :size="20" />
-                  <AlertTriangle v-else class="status-icon warning" :size="20" />
-                  <div>
-                    <h4 class="conflict-card-title">
-                      {{ t('routing.conflict_report_title') }}
-                      <span class="conflict-count-pill">{{ t('routing.conflict_items_count', { count: routingHealthReport.conflicts.length }) }}</span>
-                    </h4>
-                    <p class="conflict-card-subtitle">
-                      {{ t('routing.conflict_report_desc') }}
-                    </p>
-                  </div>
-                </div>
-                <button class="btn-icon-subtle toggle-collapse-btn" :title="showConflictDetails ? t('common.collapse') : t('common.expand')">
-                  <ChevronUp v-if="showConflictDetails" :size="16" />
-                  <ChevronDown v-else :size="16" />
+            <!-- Upstream DNS Servers List -->
+            <div class="dns-panel-box mb-4">
+              <div class="panel-header-row mb-3">
+                <h4 class="dns-panel-title">
+                  <Server :size="14" class="text-info mr-1" />
+                  {{ t('dns.upstreams_title') }} ({{ configModel.dns.upstreams.length }})
+                </h4>
+                <button class="btn btn-secondary btn-sm" @click="addDnsUpstream()">
+                  <Plus :size="13" /> {{ t('dns.btn_add_upstream') }}
                 </button>
               </div>
 
-              <div v-if="showConflictDetails" class="conflict-list">
-                <div
-                  v-for="conflict in routingHealthReport.conflicts"
-                  :key="conflict.id"
-                  class="conflict-item"
-                  :class="conflict.severity"
-                >
-                  <div class="conflict-item-header">
-                    <span class="sev-tag" :class="conflict.severity">
-                      {{ conflict.severity === 'error' ? t('routing.diag_error') : (conflict.severity === 'warning' ? t('routing.diag_warning') : t('routing.diag_suggestion')) }}
-                    </span>
-                    <span class="conflict-name">{{ conflict.title }}</span>
-                    <div v-if="conflict.ruleIndices.length > 0" class="involved-rules">
-                      <span class="lbl-involved">{{ t('routing.diag_involved_lines') }}:</span>
-                      <button
-                        v-for="idx in conflict.ruleIndices"
-                        :key="idx"
-                        class="rule-link-chip"
-                        @click="highlightRule(idx)"
-                        :title="t('routing.diag_highlight_tip')"
-                      >
-                        #{{ idx + 1 }}
+              <table class="dns-table">
+                <thead>
+                  <tr>
+                    <th style="width: 180px">{{ t('dns.col_upstream_tag') }}</th>
+                    <th>{{ t('dns.col_upstream_addr') }}</th>
+                    <th style="width: 100px; text-align: right">{{ t('dns.col_upstream_action') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(u, uIdx) in configModel.dns.upstreams" :key="uIdx">
+                    <td>
+                      <input v-model="u.tag" class="form-control form-control-sm" placeholder="tag" @input="isDirty = true" />
+                    </td>
+                    <td>
+                      <input v-model="u.address" class="form-control form-control-sm mono" placeholder="udp://223.5.5.5:53" @input="isDirty = true" />
+                    </td>
+                    <td style="text-align: right">
+                      <button class="btn-icon danger" @click="removeDnsUpstream(uIdx)" :title="t('common.delete')">
+                        <Trash2 :size="13" />
                       </button>
-                    </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- DNS Request Routing Rules -->
+            <div class="dns-panel-box">
+              <div class="panel-header-row mb-3">
+                <div>
+                  <h4 class="dns-panel-title">
+                    <GitFork :size="14" class="text-primary mr-1" />
+                    {{ t('dns.req_routing_title') }} ({{ configModel.dns.requestRules.length }})
+                  </h4>
+                  <p class="text-xs text-muted">{{ t('dns.req_routing_desc') }}</p>
+                </div>
+                <button class="btn btn-secondary btn-sm" @click="addDnsRequestRule()">
+                  <Plus :size="13" /> {{ t('dns.btn_add_rule') }}
+                </button>
+              </div>
+
+              <table class="dns-table">
+                <thead>
+                  <tr>
+                    <th style="width: 50px">#</th>
+                    <th>{{ t('dns.col_rule_cond') }}</th>
+                    <th style="width: 220px">{{ t('dns.col_rule_upstream') }}</th>
+                    <th style="width: 140px; text-align: right">{{ t('routing.col_order') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(dr, drIdx) in configModel.dns.requestRules" :key="drIdx">
+                    <td class="idx-cell">{{ drIdx + 1 }}</td>
+                    <td>
+                      <input v-model="dr.condition" class="form-control form-control-sm mono" placeholder="qname(geosite:cn)" @input="isDirty = true" />
+                    </td>
+                    <td>
+                      <select v-model="dr.target" class="form-control form-control-sm" @change="isDirty = true">
+                        <option v-for="u in configModel.dns.upstreams" :key="u.tag" :value="u.tag">{{ u.tag }}</option>
+                      </select>
+                    </td>
+                    <td style="text-align: right" class="row-action-cell">
+                      <button class="btn-icon" :disabled="drIdx === 0" @click="moveDnsRequestRule(drIdx, 'up')">
+                        <ArrowUp :size="12" />
+                      </button>
+                      <button class="btn-icon" :disabled="drIdx === configModel.dns.requestRules.length - 1" @click="moveDnsRequestRule(drIdx, 'down')">
+                        <ArrowDown :size="12" />
+                      </button>
+                      <button class="btn-icon delete" @click="removeDnsRequestRule(drIdx)">
+                        <Trash2 :size="12" />
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section 5: Groups (按官方文档第五项) -->
+          <div v-else-if="activeSection === 'groups'" class="form-section-body">
+            <div class="section-title-bar">
+              <div>
+                <h3>{{ t('config.section.groups') }}</h3>
+                <p>{{ t('config.groups_desc') }}</p>
+              </div>
+              <button class="btn btn-primary" @click="openAddGroup">
+                <Plus :size="14" /> {{ t('config.new_group') }}
+              </button>
+            </div>
+
+            <div v-if="configModel.groups.length === 0" class="empty-state-box">
+              <Layers class="empty-icon" :size="36" />
+              <div class="empty-text">{{ t('config.groups_empty') }}</div>
+              <p class="empty-subtext">{{ t('config.groups_empty_sub') }}</p>
+              <button class="btn btn-primary btn-sm" @click="openAddGroup">
+                <Plus :size="13" /> {{ t('config.new_group') }}
+              </button>
+            </div>
+
+            <div v-else class="cards-grid">
+              <div v-for="group in configModel.groups" :key="group.name" class="item-card group-card">
+                <div class="card-top">
+                  <span class="group-badge">Group</span>
+                  <span class="card-key">{{ group.name }}</span>
+                  <div class="card-actions">
+                    <button class="btn-icon" @click="openEditGroup(group)" :title="t('common.edit')">
+                      <Edit2 :size="13" />
+                    </button>
+                    <button class="btn-icon delete" @click="deleteGroup(group.name)" :title="t('common.delete')">
+                      <Trash2 :size="13" />
+                    </button>
                   </div>
-                  <div class="conflict-desc">{{ conflict.message }}</div>
-                  <div class="conflict-suggestion">
-                    <Lightbulb class="sugg-icon" :size="14" />
-                    <div class="sugg-content">
-                      <span class="sugg-label">{{ t('routing.diag_sugg_label') }}:</span>
-                      <span>{{ conflict.suggestion }}</span>
-                    </div>
-                    <!-- Quick action buttons -->
-                    <div class="quick-fix-actions">
-                      <button
-                        v-if="conflict.id === 'missing-private-bypass'"
-                        class="btn btn-sm btn-quick-fix"
-                        @click="fixMissingPrivateBypass"
-                        :title="t('routing.diag_fix_private')"
-                      >
-                        <Wand2 :size="12" /> {{ t('routing.diag_fix_private') }}
-                      </button>
-                      <button
-                        v-if="conflict.id === 'fallback-not-last'"
-                        class="btn btn-sm btn-quick-fix"
-                        @click="fixFallbackOrder"
-                        :title="t('routing.diag_fix_fallback')"
-                      >
-                        <Wand2 :size="12" /> {{ t('routing.diag_fix_fallback') }}
-                      </button>
+                </div>
+                <div class="card-info">
+                  <div class="row">
+                    <span class="lbl">{{ t('config.field.group_policy') }}:</span>
+                    <span class="val code-tag">{{ group.policy || 'default' }}</span>
+                  </div>
+                  <div class="filter-list">
+                    <span class="lbl">{{ t('config.field.group_filters') }}:</span>
+                    <div class="chips-wrap">
+                      <span v-for="(f, i) in group.filters" :key="i" class="filter-chip">
+                        {{ f }}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1888,253 +2185,410 @@ onMounted(() => {
             </div>
           </div>
 
-          <div v-if="configModel.routingRules.length === 0" class="empty-state-box">
-            <GitFork class="empty-icon" :size="36" />
-            <div class="empty-text">{{ t('routing.empty_title') }}</div>
-            <p class="empty-subtext">{{ t('routing.empty_desc') }}</p>
-            <button class="btn btn-primary btn-sm" @click="openAddRoute">
-              <Plus :size="13" /> {{ t('config.new_rule') }}
-            </button>
+          <!-- Section 6: Routing (按官方文档第六项) -->
+          <div v-else-if="activeSection === 'routing'" class="form-section-body">
+            <div class="section-title-bar">
+              <div>
+                <div class="title-with-badge">
+                  <h3>{{ t('config.section.routing') }}</h3>
+                  <span
+                    v-if="routingHealthReport.hasErrors"
+                    class="health-badge danger"
+                  >
+                    <ShieldAlert :size="12" /> {{ routingHealthReport.conflicts.filter(c => c.severity === 'error').length }}
+                  </span>
+                  <span
+                    v-else-if="routingHealthReport.hasWarnings"
+                    class="health-badge warning"
+                  >
+                    <AlertTriangle :size="12" /> {{ routingHealthReport.conflicts.filter(c => c.severity === 'warning').length }}
+                  </span>
+                  <span
+                    v-else-if="configModel.routingRules.length > 0"
+                    class="health-badge success"
+                  >
+                    <ShieldCheck :size="12" />
+                  </span>
+                </div>
+                <p>{{ t('config.rules_desc') }}</p>
+              </div>
+              <div class="title-actions">
+                <button class="btn btn-primary" @click="openAddRoute">
+                  <Plus :size="14" /> {{ t('config.new_rule') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Conflict & Health Diagnostic Panel -->
+            <div v-if="configModel.routingRules.length > 0" class="conflict-panel-wrap">
+              <!-- Case 1: Healthy banner -->
+              <div v-if="!routingHealthReport.hasErrors && !routingHealthReport.hasWarnings && routingHealthReport.conflicts.length === 0" class="health-summary-banner success">
+                <ShieldCheck class="banner-icon" :size="18" />
+                <div class="banner-text">
+                  <span class="banner-title">{{ t('routing.conflict_healthy') }}</span>
+                  <span class="banner-sub">{{ t('routing.health_ok_desc', { count: configModel.routingRules.length }) }}</span>
+                </div>
+              </div>
+
+              <!-- Case 2: Conflicts or optimization suggestions -->
+              <div v-else class="conflict-card" :class="{ 'has-error': routingHealthReport.hasErrors }">
+                <div class="conflict-card-header" @click="showConflictDetails = !showConflictDetails">
+                  <div class="header-left">
+                    <ShieldAlert v-if="routingHealthReport.hasErrors" class="status-icon danger" :size="20" />
+                    <AlertTriangle v-else class="status-icon warning" :size="20" />
+                    <div>
+                      <h4 class="conflict-card-title">
+                        {{ t('routing.conflict_report_title') }}
+                        <span class="conflict-count-pill">{{ t('routing.conflict_items_count', { count: routingHealthReport.conflicts.length }) }}</span>
+                      </h4>
+                      <p class="conflict-card-subtitle">
+                        {{ t('routing.conflict_report_desc') }}
+                      </p>
+                    </div>
+                  </div>
+                  <button class="btn-icon-subtle toggle-collapse-btn" :title="showConflictDetails ? t('common.collapse') : t('common.expand')">
+                    <ChevronUp v-if="showConflictDetails" :size="16" />
+                    <ChevronDown v-else :size="16" />
+                  </button>
+                </div>
+
+                <div v-if="showConflictDetails" class="conflict-list">
+                  <div
+                    v-for="conflict in routingHealthReport.conflicts"
+                    :key="conflict.id"
+                    class="conflict-item"
+                    :class="conflict.severity"
+                  >
+                    <div class="conflict-item-header">
+                      <span class="sev-tag" :class="conflict.severity">
+                        {{ conflict.severity === 'error' ? t('routing.diag_error') : (conflict.severity === 'warning' ? t('routing.diag_warning') : t('routing.diag_suggestion')) }}
+                      </span>
+                      <span class="conflict-name">{{ conflict.title }}</span>
+                      <div v-if="conflict.ruleIndices.length > 0" class="involved-rules">
+                        <span class="lbl-involved">{{ t('routing.diag_involved_lines') }}:</span>
+                        <button
+                          v-for="idx in conflict.ruleIndices"
+                          :key="idx"
+                          class="rule-link-chip"
+                          @click="highlightRule(idx)"
+                          :title="t('routing.diag_highlight_tip')"
+                        >
+                          #{{ idx + 1 }}
+                        </button>
+                      </div>
+                    </div>
+                    <div class="conflict-desc">{{ conflict.message }}</div>
+                    <div class="conflict-suggestion">
+                      <Lightbulb class="sugg-icon" :size="14" />
+                      <div class="sugg-content">
+                        <span class="sugg-label">{{ t('routing.diag_sugg_label') }}:</span>
+                        <span>{{ conflict.suggestion }}</span>
+                      </div>
+                      <!-- Quick action buttons -->
+                      <div class="quick-fix-actions">
+                        <button
+                          v-if="conflict.id === 'missing-private-bypass'"
+                          class="btn btn-sm btn-quick-fix"
+                          @click="fixMissingPrivateBypass"
+                          :title="t('routing.diag_fix_private')"
+                        >
+                          <Wand2 :size="12" /> {{ t('routing.diag_fix_private') }}
+                        </button>
+                        <button
+                          v-if="conflict.id === 'fallback-not-last'"
+                          class="btn btn-sm btn-quick-fix"
+                          @click="fixFallbackOrder"
+                          :title="t('routing.diag_fix_fallback')"
+                        >
+                          <Wand2 :size="12" /> {{ t('routing.diag_fix_fallback') }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="configModel.routingRules.length === 0" class="empty-state-box">
+              <GitFork class="empty-icon" :size="36" />
+              <div class="empty-text">{{ t('routing.empty_title') }}</div>
+              <p class="empty-subtext">{{ t('routing.empty_desc') }}</p>
+              <button class="btn btn-primary btn-sm" @click="openAddRoute">
+                <Plus :size="13" /> {{ t('config.new_rule') }}
+              </button>
+            </div>
+
+            <div v-else class="rule-table-wrap">
+              <table class="rule-table">
+                <thead>
+                  <tr>
+                    <th style="width: 60px">#</th>
+                    <th>{{ t('routing.col_condition') }}</th>
+                    <th style="width: 150px">{{ t('routing.col_action') }}</th>
+                    <th style="width: 110px">{{ t('routing.col_status') }}</th>
+                    <th style="width: 160px; text-align: right">{{ t('routing.col_order') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="(rule, idx) in configModel.routingRules"
+                    :key="idx"
+                    :id="`route-row-${idx}`"
+                    :class="{
+                      'row-highlighted': highlightedRuleIndex === idx,
+                      'row-error': routingHealthReport.ruleStatusMap[idx]?.severity === 'error',
+                      'row-warning': routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'
+                    }"
+                  >
+                    <td class="idx-cell">
+                      <span class="idx-num">{{ idx + 1 }}</span>
+                    </td>
+                    <td class="mono cond-cell">
+                      <span v-if="rule.condition === 'fallback'" class="fallback-tag">{{ t('routing.drag_tip_fallback') }}</span>
+                      <span v-else class="rule-condition-text">{{ rule.condition }}</span>
+                    </td>
+                    <td>
+                      <span class="target-tag" :class="rule.target">{{ rule.target }}</span>
+                    </td>
+                    <td>
+                      <span
+                        v-if="routingHealthReport.ruleStatusMap[idx]?.severity === 'error'"
+                        class="rule-health-tag danger"
+                        :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
+                      >
+                        <ShieldAlert :size="12" /> {{ t('routing.status_conflict') }}
+                      </span>
+                      <span
+                        v-else-if="routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'"
+                        class="rule-health-tag warning"
+                        :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
+                      >
+                        <AlertTriangle :size="12" /> {{ t('routing.status_shadow') }}
+                      </span>
+                      <span v-else class="rule-health-tag ok" :title="t('routing.status_ok')">
+                        <Check :size="12" /> {{ t('routing.status_ok') }}
+                      </span>
+                    </td>
+                    <td style="text-align: right" class="row-action-cell">
+                      <button
+                        class="btn-icon"
+                        :disabled="idx === 0"
+                        @click="moveRouteUp(idx)"
+                        :title="t('routing.table_tip_priority')"
+                      >
+                        <ArrowUp :size="12" />
+                      </button>
+                      <button
+                        class="btn-icon"
+                        :disabled="idx === configModel.routingRules.length - 1"
+                        @click="moveRouteDown(idx)"
+                        :title="t('routing.table_tip_priority')"
+                      >
+                        <ArrowDown :size="12" />
+                      </button>
+                      <button
+                        class="btn-icon"
+                        @click="duplicateRoute(idx)"
+                        :title="t('common.copy')"
+                      >
+                        <Copy :size="12" />
+                      </button>
+                      <button
+                        class="btn-icon"
+                        @click="openEditRoute(rule, idx)"
+                        :title="t('common.edit')"
+                      >
+                        <Edit2 :size="12" />
+                      </button>
+                      <button
+                        class="btn-icon delete"
+                        @click="deleteRoute(idx)"
+                        :title="t('common.delete')"
+                      >
+                        <Trash2 :size="12" />
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div v-else class="rule-table-wrap">
-            <table class="rule-table">
-              <thead>
-                <tr>
-                  <th style="width: 60px">#</th>
-                  <th>{{ t('routing.col_condition') }}</th>
-                  <th style="width: 150px">{{ t('routing.col_action') }}</th>
-                  <th style="width: 110px">{{ t('routing.col_status') }}</th>
-                  <th style="width: 160px; text-align: right">{{ t('routing.col_order') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="(rule, idx) in configModel.routingRules"
-                  :key="idx"
-                  :id="`route-row-${idx}`"
-                  :class="{
-                    'row-highlighted': highlightedRuleIndex === idx,
-                    'row-error': routingHealthReport.ruleStatusMap[idx]?.severity === 'error',
-                    'row-warning': routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'
-                  }"
-                >
-                  <td class="idx-cell">
-                    <span class="idx-num">{{ idx + 1 }}</span>
-                  </td>
-                  <td class="mono cond-cell">
-                    <span v-if="rule.condition === 'fallback'" class="fallback-tag">{{ t('routing.drag_tip_fallback') }}</span>
-                    <span v-else class="rule-condition-text">{{ rule.condition }}</span>
-                  </td>
-                  <td>
-                    <span class="target-tag" :class="rule.target">{{ rule.target }}</span>
-                  </td>
-                  <td>
-                    <span
-                      v-if="routingHealthReport.ruleStatusMap[idx]?.severity === 'error'"
-                      class="rule-health-tag danger"
-                      :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
-                    >
-                      <ShieldAlert :size="12" /> {{ t('routing.status_conflict') }}
-                    </span>
-                    <span
-                      v-else-if="routingHealthReport.ruleStatusMap[idx]?.severity === 'warning'"
-                      class="rule-health-tag warning"
-                      :title="routingHealthReport.ruleStatusMap[idx]?.messages.join('\n')"
-                    >
-                      <AlertTriangle :size="12" /> {{ t('routing.status_shadow') }}
-                    </span>
-                    <span v-else class="rule-health-tag ok" :title="t('routing.status_ok')">
-                      <Check :size="12" /> {{ t('routing.status_ok') }}
-                    </span>
-                  </td>
-                  <td style="text-align: right" class="row-action-cell">
-                    <!-- Move up / down -->
+          <!-- Section 7: Routing Modes (分流模式：DNS设置+分流规则联动集合) -->
+          <div v-else-if="activeSection === 'modes'" class="form-section-body">
+            <div class="section-title-bar">
+              <div>
+                <h3>{{ t('modes.title') }}</h3>
+                <p>{{ t('modes.subtitle') }}</p>
+              </div>
+              <button class="btn btn-primary" @click="openNewModeModal">
+                <Plus :size="14" /> {{ t('modes.btn_new') }}
+              </button>
+            </div>
+
+            <!-- Modes Cards Grid -->
+            <div class="modes-grid">
+              <div
+                v-for="mode in modesList"
+                :key="mode.id"
+                class="mode-card"
+                :class="{ 'mode-active': mode.id === activeModeId }"
+              >
+                <!-- Card Header -->
+                <div class="mode-card-header">
+                  <div class="mode-title-wrap">
+                    <div class="mode-icon-avatar" :class="mode.id">
+                      <Shield v-if="mode.id === 'gfwlist'" :size="20" />
+                      <Compass v-else-if="mode.id === 'bypass_cn'" :size="20" />
+                      <Flag v-else-if="mode.id === 'only_cn'" :size="20" />
+                      <Globe v-else-if="mode.id === 'global'" :size="20" />
+                      <Sliders v-else :size="20" />
+                    </div>
+                    <div>
+                      <div class="mode-name-row">
+                        <h4>{{ mode.name }}</h4>
+                        <span class="mode-tag">{{ mode.badge }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Bug 2 Fixed: Top-right corner prominent active badge or Apply button -->
+                  <div class="mode-actions">
+                    <div v-if="mode.id === activeModeId" class="badge-active-prominent">
+                      <CheckCircle2 :size="14" />
+                      <span>{{ t('modes.active_badge_icon') }}</span>
+                    </div>
                     <button
-                      class="btn-icon"
-                      :disabled="idx === 0"
-                      @click="moveRouteUp(idx)"
-                      :title="t('routing.table_tip_priority')"
+                      v-else
+                      class="btn btn-primary btn-sm btn-apply-mode"
+                      :disabled="applyingModeId === mode.id"
+                      @click="applyMode(mode)"
                     >
-                      <ArrowUp :size="12" />
+                      <Check v-if="applyingModeId !== mode.id" :size="13" />
+                      <RefreshCw v-else :size="13" class="spin" />
+                      <span>{{ applyingModeId === mode.id ? t('modes.applying') : t('modes.apply_this_mode') }}</span>
                     </button>
                     <button
-                      class="btn-icon"
-                      :disabled="idx === configModel.routingRules.length - 1"
-                      @click="moveRouteDown(idx)"
-                      :title="t('routing.table_tip_priority')"
-                    >
-                      <ArrowDown :size="12" />
-                    </button>
-                    <button
-                      class="btn-icon"
-                      @click="duplicateRoute(idx)"
-                      :title="t('common.copy')"
-                    >
-                      <Copy :size="12" />
-                    </button>
-                    <button
-                      class="btn-icon"
-                      @click="openEditRoute(rule, idx)"
-                      :title="t('common.edit')"
-                    >
-                      <Edit2 :size="12" />
-                    </button>
-                    <button
-                      class="btn-icon delete"
-                      @click="deleteRoute(idx)"
+                      v-if="mode.isCustom"
+                      class="btn-icon-subtle danger"
+                      @click="deleteCustomMode(mode)"
                       :title="t('common.delete')"
                     >
-                      <Trash2 :size="12" />
+                      <Trash2 :size="13" />
                     </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+                  </div>
+                </div>
 
-        <!-- Section 4: Global -->
-        <div v-else-if="activeSection === 'global'" class="form-section-body">
-          <div class="section-title-bar">
-            <div>
-              <h3>{{ t('config.section.global') }}</h3>
-              <p>{{ t('config.global_desc') }}</p>
-            </div>
-          </div>
+                <!-- Card Body / Desc -->
+                <p class="mode-desc">{{ mode.description }}</p>
 
-          <div class="form-grid">
-            <div class="form-group">
-              <label>{{ t('config.field.global_log_level') }}</label>
-              <select v-model="configModel.globals['log_level']" @change="isDirty = true">
-                <option value="trace">trace</option>
-                <option value="debug">debug</option>
-                <option value="info">info</option>
-                <option value="warn">warn</option>
-                <option value="error">error</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label>dial_mode</label>
-              <select v-model="configModel.globals['dial_mode']" @change="isDirty = true">
-                <option value="domain">domain</option>
-                <option value="ip">ip</option>
-                <option value="domain+">domain+</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label>{{ t('config.field.global_lan_iface') }}</label>
-              <input v-model="configModel.globals['lan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_lan_iface_ph')" />
-            </div>
-
-            <div class="form-group">
-              <label>{{ t('config.field.global_wan_iface') }}</label>
-              <input v-model="configModel.globals['wan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_wan_iface_ph')" />
-            </div>
-
-            <div class="form-group">
-              <label>{{ t('config.field.global_tproxy_port') }}</label>
-              <input v-model="configModel.globals['tproxy_port']" @input="isDirty = true" :placeholder="t('config.field.global_tproxy_port_ph')" />
-            </div>
-
-            <div class="form-group">
-              <label>{{ t('config.field.global_tcp_check_url') }}</label>
-              <input v-model="configModel.globals['tcp_check_url']" @input="isDirty = true" :placeholder="t('config.field.global_tcp_check_url_ph')" />
-            </div>
-
-            <div class="form-group">
-              <label>check_interval</label>
-              <input v-model="configModel.globals['check_interval']" @input="isDirty = true" placeholder="30s" />
-            </div>
-
-            <div class="form-group">
-              <label>allow_insecure</label>
-              <select v-model="configModel.globals['allow_insecure']" @change="isDirty = true">
-                <option value="false">false</option>
-                <option value="true">true</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 5: Subscriptions -->
-        <div v-else-if="activeSection === 'subscriptions'" class="form-section-body">
-          <div class="section-title-bar">
-            <div>
-              <h3>{{ t('config.section.subscriptions') }}</h3>
-              <p>{{ t('config.sub_desc') }}</p>
-            </div>
-            <button class="btn btn-primary" @click="openAddSub">
-              <Plus :size="14" /> {{ t('config.new_sub') }}
-            </button>
-          </div>
-
-          <div v-if="configModel.subscriptions.length === 0" class="empty-state-box">
-            <Download class="empty-icon" :size="36" />
-            <div class="empty-text">{{ t('config.sub_empty') }}</div>
-            <p class="empty-subtext">{{ t('config.sub_empty_desc') }}</p>
-            <button class="btn btn-primary btn-sm" @click="openAddSub">
-              <Plus :size="13" /> {{ t('config.new_sub') }}
-            </button>
-          </div>
-
-          <div v-else class="cards-grid">
-            <div v-for="sub in configModel.subscriptions" :key="sub.tag" class="item-card">
-              <div class="card-top">
-                <span class="sub-badge">Sub</span>
-                <span class="card-key">{{ sub.tag }}</span>
-                <div class="card-actions">
-                  <button class="btn-sub-fetch" @click="fetchSubNodes(sub)" :title="t('config.btn_fetch_nodes_tip')">
-                    <ListFilter :size="13" /> {{ t('config.btn_fetch_nodes') }}
-                  </button>
-                  <button class="btn-icon delete" @click="deleteSub(sub.tag)" :title="t('common.delete')">
-                    <Trash2 :size="13" />
+                <!-- Rules & Fast Test Bar -->
+                <div class="mode-meta-bar">
+                  <div class="rules-info">
+                    <span class="rules-count-pill">{{ mode.rules.length }} 条分流规则</span>
+                    <!-- Bug 1 Fixed: Click triggers openViewRules -->
+                    <button class="btn-text-link" @click="openViewRules(mode)">
+                      <Eye :size="13" />
+                      <span>{{ t('modes.view_rules', { count: mode.rules.length }) }}</span>
+                    </button>
+                  </div>
+                  <button
+                    class="btn btn-secondary btn-xs btn-fast-test"
+                    :disabled="testingModeId === mode.id"
+                    @click="runFastTestForMode(mode.id)"
+                  >
+                    <Zap :size="12" :class="{ 'text-warning': testingModeId !== mode.id, spin: testingModeId === mode.id }" />
+                    <span>{{ testingModeId === mode.id ? t('modes.fast_testing') : t('modes.fast_test') }}</span>
                   </button>
                 </div>
-              </div>
-              <div class="card-info">
-                <div class="row">
-                  <span class="lbl">URL:</span>
-                  <span class="val mono truncate" :title="sub.url">{{ sub.url }}</span>
+
+                <!-- Fast Test Results Panel -->
+                <div class="mode-test-panel">
+                  <div class="test-panel-header">
+                    <span class="test-panel-title">
+                      <Zap :size="13" class="text-warning" />
+                      {{ t('modes.test_panel_title') }}
+                    </span>
+                    <span class="test-hint">{{ t('modes.test_panel_desc') }}</span>
+                  </div>
+                  <div class="test-items-list">
+                    <div
+                      v-for="item in mode.testResults"
+                      :key="item.id"
+                      class="test-item-row"
+                    >
+                      <div class="item-col target-col">
+                        <span class="target-name">{{ item.name }}</span>
+                        <span class="target-cat">{{ item.category }}</span>
+                      </div>
+
+                      <div class="item-col out-col">
+                        <span
+                          class="badge-out"
+                          :class="{
+                            'out-direct': item.expectedOut.includes('direct') || item.expectedOut.includes('直连'),
+                            'out-proxy': item.expectedOut.includes('proxy') || item.expectedOut.includes('代理'),
+                            'out-block': item.expectedOut.includes('block') || item.expectedOut.includes('阻断')
+                          }"
+                        >
+                          {{ item.expectedOut }}
+                        </span>
+                      </div>
+
+                      <div class="item-col rule-col" :title="item.matchedRule">
+                        <code>{{ item.matchedRule }}</code>
+                      </div>
+
+                      <div class="item-col latency-col">
+                        <span class="latency-badge" :class="item.latency < 40 ? 'fast' : (item.latency < 90 ? 'medium' : 'slow')">
+                          {{ item.latency }} ms
+                        </span>
+                      </div>
+
+                      <div class="item-col detail-col" :title="item.message">
+                        <span class="detail-text">{{ item.message }}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        <!-- 2. Code Editor Mode -->
+        <div v-show="currentMode === 'code'" class="editor-wrapper">
+          <div ref="editorContainer" class="editor-host"></div>
+        </div>
       </div>
 
-      <!-- 2. Code Editor Mode -->
-      <div v-show="currentMode === 'code'" class="editor-wrapper">
-        <div ref="editorContainer" class="editor-host"></div>
-      </div>
+      <!-- Status Bar Footer -->
+      <footer class="status-bar">
+        <div class="status-left">
+          <div
+            v-if="validationStatus.checked"
+            class="val-indicator"
+            :class="{ 'valid': validationStatus.valid, 'invalid': !validationStatus.valid }"
+          >
+            <CheckCircle2 v-if="validationStatus.valid" class="icon" :size="14" />
+            <AlertCircle v-else class="icon" :size="14" />
+            <span class="val-msg">{{ validationStatus.message }}</span>
+          </div>
+          <div v-else class="val-indicator neutral">
+            <span class="val-msg">{{ t('config.val_not_checked') }}</span>
+          </div>
+        </div>
+
+        <div class="status-right">
+          <span>{{ t('config.last_modified', { time: formatDate(lastModTime) }) }}</span>
+          <button class="btn-text" @click="() => loadConfig()" :title="t('common.reload_disk')">
+            <RefreshCw class="icon" :size="12" /> {{ t('common.reload') }}
+          </button>
+        </div>
+      </footer>
     </div>
 
-    <!-- Status Bar Footer -->
-    <footer class="status-bar">
-      <div class="status-left">
-        <div
-          v-if="validationStatus.checked"
-          class="val-indicator"
-          :class="{ 'valid': validationStatus.valid, 'invalid': !validationStatus.valid }"
-        >
-          <CheckCircle2 v-if="validationStatus.valid" class="icon" :size="14" />
-          <AlertCircle v-else class="icon" :size="14" />
-          <span class="val-msg">{{ validationStatus.message }}</span>
-        </div>
-        <div v-else class="val-indicator neutral">
-          <span class="val-msg">{{ t('config.val_not_checked') }}</span>
-        </div>
-      </div>
-
-      <div class="status-right">
-        <span>{{ t('config.last_modified', { time: formatDate(lastModTime) }) }}</span>
-        <button class="btn-text" @click="() => loadConfig()" :title="t('common.reload_disk')">
-          <RefreshCw class="icon" :size="12" /> {{ t('common.reload') }}
-        </button>
-      </div>
-    </footer>
+    <!-- ==================== TOP-LEVEL MODALS ==================== -->
 
     <!-- Node Modal -->
     <div v-if="showNodeModal" class="modal-backdrop" @click.self="showNodeModal = false">
@@ -2194,7 +2648,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Route Rule Modal (Upgraded with Presets, Builder & Syntax Guide) -->
+    <!-- Route Rule Modal -->
     <div v-if="showRouteModal" class="modal-backdrop" @click.self="showRouteModal = false">
       <div class="modal-card modal-lg">
         <div class="modal-header">
@@ -2225,104 +2679,41 @@ onMounted(() => {
         <!-- Tab 1: Form Configuration -->
         <div v-if="routeModalTab === 'form'" class="modal-body form-modal">
           <!-- Input Mode Switcher -->
-          <div class="mode-pill-bar">
-            <span class="mode-pill-label">{{ t('config.route_mode_label') }}</span>
-            <div class="pill-group">
-              <button
-                type="button"
-                class="pill-btn"
-                :class="{ active: routeInputMode === 'preset' }"
-                @click="routeInputMode = 'preset'"
-              >
-                <Sparkles :size="12" />
-                <span>⚡ {{ t('routing.mode_preset') }}</span>
-              </button>
-              <button
-                type="button"
-                class="pill-btn"
-                :class="{ active: routeInputMode === 'builder' }"
-                @click="routeInputMode = 'builder'"
-              >
-                <Wand2 :size="12" />
-                <span>🛠️ {{ t('routing.mode_builder') }}</span>
-              </button>
-              <button
-                type="button"
-                class="pill-btn"
-                :class="{ active: routeInputMode === 'custom' }"
-                @click="routeInputMode = 'custom'"
-              >
-                <Code :size="12" />
-                <span>✏️ {{ t('routing.mode_custom') }}</span>
-              </button>
-            </div>
+          <div class="route-input-tabs">
+            <button
+              class="tab-pill"
+              :class="{ active: routeInputMode === 'preset' }"
+              @click="routeInputMode = 'preset'"
+            >
+              <Sparkles :size="12" /> {{ t('routing.editor_mode_preset') }}
+            </button>
+            <button
+              class="tab-pill"
+              :class="{ active: routeInputMode === 'builder' }"
+              @click="routeInputMode = 'builder'"
+            >
+              <Sliders :size="12" /> {{ t('routing.editor_mode_builder') }}
+            </button>
+            <button
+              class="tab-pill"
+              :class="{ active: routeInputMode === 'custom' }"
+              @click="routeInputMode = 'custom'"
+            >
+              <FileCode :size="12" /> {{ t('routing.editor_mode_custom') }}
+            </button>
           </div>
 
-          <!-- Mode A: Presets Dropdown -->
+          <!-- Mode A: Presets -->
           <div v-if="routeInputMode === 'preset'" class="preset-section">
             <div class="field">
-              <label>{{ t('config.preset_select_label') }}</label>
-              <select
-                :value="selectedPresetId"
-                @change="applyPreset(($event.target as HTMLSelectElement).value)"
-                class="preset-select"
-              >
-                <optgroup :label="t('routing.tmpl_cat_common')">
-                  <option
-                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'common')"
-                    :key="p.id"
-                    :value="p.id"
-                  >
-                    {{ p.name }} → {{ p.condition }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('routing.tmpl_cat_security')">
-                  <option
-                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'security')"
-                    :key="p.id"
-                    :value="p.id"
-                  >
-                    {{ p.name }} → {{ p.condition }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('routing.tmpl_cat_media')">
-                  <option
-                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'media')"
-                    :key="p.id"
-                    :value="p.id"
-                  >
-                    {{ p.name }} → {{ p.condition }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('routing.tmpl_cat_dev')">
-                  <option
-                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'dev')"
-                    :key="p.id"
-                    :value="p.id"
-                  >
-                    {{ p.name }} → {{ p.condition }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('routing.tmpl_cat_advanced')">
-                  <option
-                    v-for="p in ROUTING_PRESETS.filter(x => x.category === 'advanced')"
-                    :key="p.id"
-                    :value="p.id"
-                  >
-                    {{ p.name }} → {{ p.condition }}
-                  </option>
-                </optgroup>
+              <label>{{ t('routing.select_preset_label') }}</label>
+              <select v-model="selectedPresetId" @change="applyPreset(selectedPresetId)">
+                <option v-for="p in ROUTING_PRESETS" :key="p.id" :value="p.id">
+                  {{ p.name }} ({{ p.description }})
+                </option>
               </select>
-            </div>
-
-            <!-- Preset explanation box -->
-            <div v-if="selectedPresetId" class="preset-card-info">
-              <div class="preset-desc-line">
-                <Info :size="14" class="info-icon text-accent" />
-                <span>{{ ROUTING_PRESETS.find(x => x.id === selectedPresetId)?.description }}</span>
-              </div>
-              <div v-if="ROUTING_PRESETS.find(x => x.id === selectedPresetId)?.tip" class="preset-tip-line">
-                <Lightbulb :size="14" class="tip-icon text-warning" />
+              <div class="preset-tip-box" v-if="ROUTING_PRESETS.find(x => x.id === selectedPresetId)?.tip">
+                <Info :size="13" />
                 <span>{{ ROUTING_PRESETS.find(x => x.id === selectedPresetId)?.tip }}</span>
               </div>
             </div>
@@ -2465,7 +2856,7 @@ onMounted(() => {
           <div class="syntax-preview-box">
             <span class="preview-label">{{ t('routing.stmt_title') }}:</span>
             <code class="preview-code">
-              {{ editingRoute.condition.trim() === 'fallback' ? `fallback: ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '<target>') : editingRoute.target}` : `${editingRoute.condition || '<condition>'} -> ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '<target>') : editingRoute.target}` }}
+              {{ editingRoute.condition.trim() === 'fallback' ? `fallback: ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '[target]') : editingRoute.target}` : `${editingRoute.condition || '[condition]'} -> ${editingRoute.target === '__custom__' ? (editingRoute.customTarget || '[target]') : editingRoute.target}` }}
             </code>
           </div>
 
@@ -2504,9 +2895,7 @@ onMounted(() => {
         <div v-else class="modal-body guide-modal">
           <div class="guide-banner">
             <div class="banner-title"><BookOpen :size="15" /> {{ t('routing.guide_title') }}</div>
-            <p>
-              {{ t('routing.guide_desc') }}
-            </p>
+            <p>{{ t('routing.guide_desc') }}</p>
           </div>
 
           <div class="syntax-docs-grid">
@@ -2548,7 +2937,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Sub Modal -->
+    <!-- Subscription Modal -->
     <div v-if="showSubModal" class="modal-backdrop" @click.self="showSubModal = false">
       <div class="modal-card">
         <div class="modal-header">
@@ -2621,26 +3010,35 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- New Profile Modal -->
+    <!-- New Profile Modal (Name + Note Inputs) -->
     <div v-if="showNewProfileModal" class="modal-backdrop" @click.self="showNewProfileModal = false">
       <div class="modal-card">
         <div class="modal-header">
-          <h3><Files class="icon" :size="18" /> {{ t('config.new_profile_title') }}</h3>
+          <h3><Files class="icon" :size="18" /> {{ t('config.new_modal_title') }}</h3>
           <button class="close-btn" @click="showNewProfileModal = false">&times;</button>
         </div>
         <div class="modal-body form-modal">
           <div class="field">
-            <label>{{ t('config.profile_name_label') }}</label>
+            <label>{{ t('config.new_modal_name') }}</label>
             <input
               v-model="newProfileName"
-              :placeholder="t('config.profile_name_ph')"
-              @keydown.enter="createNewProfile"
+              :placeholder="t('config.new_modal_name_ph')"
+              class="form-control"
             />
             <span class="field-hint">{{ t('config.new_profile_hint') }}</span>
           </div>
-          <div class="modal-actions">
+          <div class="field mt-3">
+            <label>{{ t('config.new_modal_note') }}</label>
+            <input
+              v-model="newProfileNote"
+              :placeholder="t('config.new_modal_note_ph')"
+              class="form-control"
+              @keydown.enter="createNewProfile"
+            />
+          </div>
+          <div class="modal-actions mt-4">
             <button class="btn btn-secondary" @click="showNewProfileModal = false">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" @click="createNewProfile">{{ t('config.btn_create_profile') }}</button>
+            <button class="btn btn-primary" @click="createNewProfile">{{ t('config.new_modal_save') }}</button>
           </div>
         </div>
       </div>
@@ -2748,124 +3146,214 @@ onMounted(() => {
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- Modal: View Mode Rules Collection -->
-      <div v-if="showModeRulesModal && viewingMode" class="modal-backdrop" @click.self="showModeRulesModal = false">
-        <div class="modal-dialog modal-lg">
-          <div class="modal-header">
-            <div class="modal-title-wrap">
-              <Eye :size="18" class="text-primary" />
-              <h3>{{ t('modes.rules_modal_title', { name: viewingMode.name }) }}</h3>
-            </div>
-            <button class="btn-icon-subtle" @click="showModeRulesModal = false">
-              <X :size="16" />
-            </button>
+    <!-- Bug 1 Fixed: View Mode Rules & DNS Collection Modal -->
+    <div v-if="showModeRulesModal && viewingMode" class="modal-backdrop" @click.self="showModeRulesModal = false">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <Eye :size="18" class="text-primary mr-2" />
+            <h3>{{ t('modes.rules_modal_title', { name: viewingMode.name }) }}</h3>
           </div>
-          <div class="modal-body">
-            <p class="modal-notice-text">{{ t('modes.rules_modal_desc') }}</p>
-            <div class="rules-table-container">
-              <table class="rules-table">
-                <thead>
-                  <tr>
-                    <th style="width: 50px">#</th>
-                    <th>{{ t('modes.col_condition') }}</th>
-                    <th style="width: 140px">{{ t('modes.col_target') }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(r, idx) in viewingMode.rules" :key="idx">
-                    <td class="rule-idx">{{ idx + 1 }}</td>
-                    <td class="rule-cond mono">{{ r.condition }}</td>
-                    <td class="rule-target">
-                      <span
-                        class="badge-out"
-                        :class="{
-                          'out-direct': r.target.includes('direct'),
-                          'out-proxy': r.target.includes('proxy'),
-                          'out-block': r.target.includes('block')
-                        }"
-                      >
-                        {{ r.target }}
-                      </span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+          <button class="btn-icon-subtle" @click="showModeRulesModal = false">
+            <X :size="16" />
+          </button>
+        </div>
+        <div class="modal-body modal-scroll-body">
+          <p class="modal-notice-text">{{ t('modes.rules_modal_desc') }}</p>
+
+          <!-- 1. DNS Settings of this mode -->
+          <div v-if="viewingMode.dnsSettings" class="mode-dns-preview-card mb-3 p-3 bg-subtle rounded border">
+            <div class="preview-header mb-2 flex-align-center">
+              <Globe :size="15" class="text-info mr-2" />
+              <strong class="text-sm">{{ t('modes.dns_section_title') }}</strong>
+              <span class="text-xs text-muted ml-2" v-if="viewingMode.dnsSettings.ipVersionPrefer">
+                (首选 IPv{{ viewingMode.dnsSettings.ipVersionPrefer }})
+              </span>
+            </div>
+            <div class="preview-content">
+              <div class="dns-preview-row mb-1">
+                <span class="text-xs text-muted mr-2 font-semibold">上游服务器:</span>
+                <span v-for="u in viewingMode.dnsSettings.upstreams" :key="u.tag" class="tag-pill mr-1 mb-1 inline-block">
+                  {{ u.tag }}: {{ u.address }}
+                </span>
+              </div>
+              <div v-if="viewingMode.dnsSettings.requestRules?.length" class="dns-preview-row">
+                <span class="text-xs text-muted mr-2 font-semibold">DNS 路由:</span>
+                <span v-for="(dr, di) in viewingMode.dnsSettings.requestRules" :key="di" class="tag-pill-subtle mr-1 mb-1 inline-block">
+                  {{ dr.condition }} &rarr; {{ dr.target }}
+                </span>
+                <span v-if="viewingMode.dnsSettings.fallback" class="tag-pill-subtle inline-block">
+                  fallback &rarr; {{ viewingMode.dnsSettings.fallback }}
+                </span>
+              </div>
             </div>
           </div>
-          <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showModeRulesModal = false">{{ t('common.close') }}</button>
-            <button
-              v-if="viewingMode.id !== activeModeId"
-              class="btn btn-primary"
-              :disabled="applyingModeId === viewingMode.id"
-              @click="applyMode(viewingMode); showModeRulesModal = false"
-            >
-              <Check :size="14" />
-              <span>{{ t('modes.apply_btn') }}</span>
-            </button>
+
+          <!-- 2. Routing Rules of this mode -->
+          <div class="rules-table-container">
+            <div class="preview-header mb-2 flex-align-center">
+              <GitFork :size="15" class="text-primary mr-2" />
+              <strong class="text-sm">{{ t('modes.routing_section_title') }} ({{ viewingMode.rules.length }} 条)</strong>
+            </div>
+            <table class="rules-table">
+              <thead>
+                <tr>
+                  <th style="width: 50px">#</th>
+                  <th>{{ t('modes.col_condition') }}</th>
+                  <th style="width: 140px">{{ t('modes.col_target') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(r, idx) in viewingMode.rules" :key="idx">
+                  <td class="rule-idx">{{ idx + 1 }}</td>
+                  <td class="rule-cond mono">{{ r.condition }}</td>
+                  <td class="rule-target">
+                    <span
+                      class="badge-out"
+                      :class="{
+                        'out-direct': r.target.includes('direct'),
+                        'out-proxy': r.target.includes('proxy'),
+                        'out-block': r.target.includes('block')
+                      }"
+                    >
+                      {{ r.target }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" @click="showModeRulesModal = false">{{ t('common.close') }}</button>
+          <button
+            v-if="viewingMode.id !== activeModeId"
+            class="btn btn-primary"
+            :disabled="applyingModeId === viewingMode.id"
+            @click="applyMode(viewingMode); showModeRulesModal = false"
+          >
+            <Check :size="14" />
+            <span>{{ t('modes.apply_this_mode') }}</span>
+          </button>
+        </div>
       </div>
+    </div>
 
-      <!-- Modal: Create Custom Routing Mode -->
-      <div v-if="showNewModeModal" class="modal-backdrop" @click.self="showNewModeModal = false">
-        <div class="modal-dialog modal-md">
-          <div class="modal-header">
-            <div class="modal-title-wrap">
-              <Plus :size="18" class="text-primary" />
-              <h3>{{ t('modes.new_modal_title') }}</h3>
+    <!-- Create Custom Routing Mode (Two-Step Flow: Step 1: Info -> Step 2: Unified DNS + Rules) -->
+    <div v-if="showNewModeModal" class="modal-backdrop" @click.self="showNewModeModal = false">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <Plus :size="18" class="text-primary mr-2" />
+            <h3 v-if="createModeStep === 1">{{ t('modes.create_step1_title') }}</h3>
+            <h3 v-else>{{ t('modes.create_step2_title') }}</h3>
+          </div>
+          <button class="btn-icon-subtle" @click="showNewModeModal = false">
+            <X :size="16" />
+          </button>
+        </div>
+
+        <!-- Step 1: Mode Name & Description -->
+        <div v-if="createModeStep === 1" class="modal-body">
+          <div class="form-group">
+            <label class="form-label required">{{ t('modes.new_name_label') }}</label>
+            <input
+              v-model="newModeForm.name"
+              class="form-control"
+              :placeholder="t('modes.new_name_ph')"
+            />
+          </div>
+          <div class="form-group mt-3">
+            <label class="form-label">{{ t('modes.new_badge_label') }}</label>
+            <input
+              v-model="newModeForm.badge"
+              class="form-control"
+              :placeholder="t('modes.new_badge_ph')"
+            />
+          </div>
+          <div class="form-group mt-3">
+            <label class="form-label">{{ t('modes.new_desc_label') }}</label>
+            <textarea
+              v-model="newModeForm.description"
+              class="form-control"
+              rows="3"
+              :placeholder="t('modes.new_desc_ph')"
+            ></textarea>
+          </div>
+        </div>
+
+        <!-- Step 2: Unified DNS Settings + Routing Rules on ONE PAGE -->
+        <div v-else class="modal-body modal-scroll-body">
+          <p class="modal-notice-text">
+            分流模式是 DNS 设置 + 分流规则的联动集合。当切换到此模式时，以下 DNS 设置与分流规则将同时写入配置文件。
+          </p>
+
+          <!-- 1. DNS Settings Section -->
+          <div class="mode-config-section mb-4 p-3 bg-subtle rounded border">
+            <div class="preview-header mb-2 flex-align-center">
+              <Globe :size="15" class="text-info mr-2" />
+              <strong class="text-sm">{{ t('modes.dns_section_title') }}</strong>
             </div>
-            <button class="btn-icon-subtle" @click="showNewModeModal = false">
-              <X :size="16" />
+            <div class="form-grid-2 mb-2">
+              <div>
+                <label class="text-xs text-muted block mb-1">首选 IP 解析版本:</label>
+                <select v-model.number="newModeForm.dnsSettings.ipVersionPrefer" class="form-control form-control-sm">
+                  <option :value="4">IPv4 优先 (推荐)</option>
+                  <option :value="6">IPv6 优先</option>
+                  <option :value="0">自动</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs text-muted block mb-1">默认回退 DNS (Fallback):</label>
+                <select v-model="newModeForm.dnsSettings.fallback" class="form-control form-control-sm">
+                  <option v-for="u in newModeForm.dnsSettings.upstreams" :key="u.tag" :value="u.tag">{{ u.tag }}</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="text-xs text-muted mb-1 font-semibold">上游 DNS 服务器列表:</div>
+            <div v-for="(u, idx) in newModeForm.dnsSettings.upstreams" :key="idx" class="flex-gap mb-1">
+              <input v-model="u.tag" class="form-control form-control-xs w-1/3" placeholder="tag (如 alidns)" />
+              <input v-model="u.address" class="form-control form-control-xs flex-1 mono" placeholder="address (如 udp://223.5.5.5:53)" />
+              <button class="btn-icon-subtle danger" @click="newModeForm.dnsSettings.upstreams.splice(idx, 1)"><Trash2 :size="12" /></button>
+            </div>
+            <button class="btn btn-secondary btn-xs mt-1" @click="newModeForm.dnsSettings.upstreams.push({ tag: 'dns_' + (newModeForm.dnsSettings.upstreams.length + 1), address: 'udp://223.5.5.5:53' })">
+              <Plus :size="12" /> 添加上游 DNS
             </button>
           </div>
-          <div class="modal-body">
-            <div class="form-group">
-              <label class="form-label required">{{ t('modes.new_name_label') }}</label>
-              <input
-                v-model="newModeForm.name"
-                class="form-control"
-                :placeholder="t('modes.new_name_ph')"
-              />
+
+          <!-- 2. Routing Rules Section -->
+          <div class="mode-config-section p-3 bg-subtle rounded border">
+            <div class="preview-header mb-2 flex-align-center">
+              <GitFork :size="15" class="text-primary mr-2" />
+              <strong class="text-sm">{{ t('modes.routing_section_title') }}</strong>
             </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('modes.new_badge_label') }}</label>
-              <input
-                v-model="newModeForm.badge"
-                class="form-control"
-                :placeholder="t('modes.new_badge_ph')"
-              />
-            </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('modes.new_desc_label') }}</label>
-              <input
-                v-model="newModeForm.description"
-                class="form-control"
-                :placeholder="t('modes.new_desc_ph')"
-              />
-            </div>
-            <div class="form-group">
-              <label class="form-label required">{{ t('modes.new_rules_label') }}</label>
-              <textarea
-                v-model="newModeForm.rulesText"
-                class="form-control mono"
-                rows="7"
-                :placeholder="t('modes.new_rules_ph')"
-              ></textarea>
-            </div>
+            <label class="form-label required">{{ t('modes.new_rules_label') }}</label>
+            <textarea
+              v-model="newModeForm.rulesText"
+              class="form-control mono text-xs"
+              rows="8"
+              :placeholder="t('modes.new_rules_ph')"
+            ></textarea>
           </div>
-          <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showNewModeModal = false">{{ t('common.cancel') }}</button>
-            <button
-              class="btn btn-primary"
-              :disabled="savingNewMode"
-              @click="saveCustomMode"
-            >
-              <Save :size="14" />
-              <span>{{ savingNewMode ? t('common.saving') : t('modes.btn_save_mode') }}</span>
-            </button>
-          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-actions">
+          <button v-if="createModeStep === 1" class="btn btn-secondary" @click="showNewModeModal = false">{{ t('common.cancel') }}</button>
+          <button v-if="createModeStep === 1" class="btn btn-primary" @click="proceedToModeConfigStep2">
+            {{ t('modes.step_next') }} &rarr;
+          </button>
+
+          <button v-if="createModeStep === 2" class="btn btn-secondary" @click="createModeStep = 1">{{ t('modes.step_prev') }}</button>
+          <button v-if="createModeStep === 2" class="btn btn-secondary" :disabled="savingNewMode" @click="saveCustomMode(false)">
+            {{ t('modes.btn_save_mode') }}
+          </button>
+          <button v-if="createModeStep === 2" class="btn btn-primary" :disabled="savingNewMode" @click="saveCustomMode(true)">
+            <Check :size="14" /> {{ t('modes.btn_save_and_apply') }}
+          </button>
         </div>
       </div>
     </div>
@@ -4928,3 +5416,308 @@ onMounted(() => {
   color: #f1f5f9;
 }
 </style>
+
+
+/* ==================== Profiles List View Styles ==================== */
+.profiles-list-view {
+  display: flex;
+  flex-direction: column;
+  padding: 24px 32px;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg-main, #090d16);
+}
+
+.profiles-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+}
+
+.header-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  border-radius: 10px;
+  margin-right: 16px;
+}
+
+.profiles-header .header-left {
+  display: flex;
+  align-items: center;
+}
+
+.profiles-title {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-main, #f8fafc);
+}
+
+.profiles-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.profiles-table-container {
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.profiles-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.profiles-table th {
+  padding: 12px 18px;
+  background: rgba(0, 0, 0, 0.2);
+  text-align: left;
+  font-weight: 600;
+  color: #94a3b8;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+}
+
+.profiles-table td {
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+.profiles-table tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.profiles-table tr.row-active {
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.profile-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.profile-filename {
+  font-size: 14px;
+  color: var(--text-main, #f8fafc);
+}
+
+.profile-note-text {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.badge-count {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  background: var(--bg-input, #1e293b);
+  color: #cbd5e1;
+  border: 1px solid var(--border-color, #334155);
+}
+
+/* Prominent Active Badge */
+.badge-active-prominent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 9999px;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+}
+
+.badge-inactive {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.1);
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  border-radius: 9999px;
+}
+
+.profile-action-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.btn-edit-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 12px;
+}
+
+.btn-activate-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 12px;
+}
+
+/* ==================== Profile Detail Header Styles ==================== */
+.profile-detail-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+}
+
+.profile-current-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.profile-current-name {
+  font-weight: 600;
+  color: #38bdf8;
+}
+
+.profile-note-pill {
+  font-size: 12px;
+  color: #94a3b8;
+  padding-left: 6px;
+  border-left: 1px solid #334155;
+}
+
+/* ==================== DNS Section Styles ==================== */
+.dns-panel-box {
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+
+.dns-panel-title {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+  display: flex;
+  align-items: center;
+}
+
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.optimistic-cache-row {
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dns-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dns-table th {
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  text-align: left;
+  font-weight: 600;
+  color: #94a3b8;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+}
+
+.dns-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Modal Z-Index Overhaul & Styling */
+.modal-backdrop {
+  z-index: 9999 !important;
+  background: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(4px);
+}
+
+.modal-scroll-body {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 18px 22px;
+}
+
+.flex-align-center {
+  display: flex;
+  align-items: center;
+}
+
+.tag-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(14, 165, 233, 0.15);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  border-radius: 4px;
+  color: #38bdf8;
+  font-size: 11px;
+}
+
+.tag-pill-subtle {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 4px;
+  color: #cbd5e1;
+  font-size: 11px;
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.flex-gap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

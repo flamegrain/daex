@@ -42,6 +42,20 @@ global {
 node {
 }
 
+dns {
+    ipversion_prefer: 4
+    upstream {
+        alidns: 'udp://223.5.5.5:53'
+        googledns: 'tcp+udp://dns.google:53'
+    }
+    routing {
+        request {
+            qname(geosite:cn) -> alidns
+            fallback: googledns
+        }
+    }
+}
+
 group {
 }
 
@@ -64,11 +78,14 @@ type BackupItem struct {
 }
 
 type ConfigProfile struct {
-	Name     string    `json:"name"`
-	Path     string    `json:"path"`
-	IsActive bool      `json:"isActive"`
-	Size     int64     `json:"size"`
-	ModTime  time.Time `json:"modTime"`
+	Name       string    `json:"name"`
+	Path       string    `json:"path"`
+	IsActive   bool      `json:"isActive"`
+	Note       string    `json:"note"`
+	RulesCount int       `json:"rulesCount"`
+	NodesCount int       `json:"nodesCount"`
+	Size       int64     `json:"size"`
+	ModTime    time.Time `json:"modTime"`
 }
 
 type NodeItem struct {
@@ -618,6 +635,7 @@ func main() {
 	mux.HandleFunc("POST /api/configs/create", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Name    string `json:"name"`
+			Note    string `json:"note"`
 			Content string `json:"content"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -632,8 +650,13 @@ func main() {
 
 		content := req.Content
 		if strings.TrimSpace(content) == "" {
-			// 新建配置使用干净的初始空白模板：节点、策略组与代理规则等均为空白
-			content = defaultBlankDaeConfig
+			noteLine := ""
+			if strings.TrimSpace(req.Note) != "" {
+				noteLine = fmt.Sprintf("# note: %s\n", strings.TrimSpace(req.Note))
+			}
+			content = noteLine + defaultBlankDaeConfig
+		} else if strings.TrimSpace(req.Note) != "" && !strings.Contains(content, "# note:") {
+			content = fmt.Sprintf("# note: %s\n%s", strings.TrimSpace(req.Note), content)
 		}
 
 		valid, msg := validateDaeConfig(r.Context(), o.DaeBin, content)
@@ -1213,6 +1236,38 @@ func resolveProfilePath(activeConfig, name string) string {
 	return filepath.Join(subConfigsDir, name)
 }
 
+func parseProfileMeta(filePath string) (note string, rulesCount int, nodesCount int) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", 0, 0
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "#") {
+			lower := strings.ToLower(trimmed)
+			if strings.HasPrefix(lower, "# note:") {
+				note = strings.TrimSpace(trimmed[7:])
+				break
+			}
+			if strings.HasPrefix(lower, "# 备注:") {
+				note = strings.TrimSpace(trimmed[strings.Index(trimmed, ":")+1:])
+				break
+			}
+			if strings.HasPrefix(lower, "# description:") {
+				note = strings.TrimSpace(trimmed[14:])
+				break
+			}
+		} else if trimmed != "" {
+			break
+		}
+	}
+	m := parseDaeConfigToModel(string(data))
+	rulesCount = len(m.RoutingRules)
+	nodesCount = len(m.Nodes) + len(m.Subscriptions)
+	return note, rulesCount, nodesCount
+}
+
 func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 	if abs, err := filepath.Abs(activeConfig); err == nil {
 		activeConfig = abs
@@ -1223,12 +1278,19 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 	// 1. Current active config file
 	if fi, err := os.Stat(activeConfig); err == nil {
 		name := filepath.Base(activeConfig)
+		note, rCount, nCount := parseProfileMeta(activeConfig)
+		if note == "" {
+			note = "系统当前主力运行配置"
+		}
 		list = append(list, ConfigProfile{
-			Name:     name,
-			Path:     activeConfig,
-			IsActive: true,
-			Size:     fi.Size(),
-			ModTime:  fi.ModTime(),
+			Name:       name,
+			Path:       activeConfig,
+			IsActive:   true,
+			Note:       note,
+			RulesCount: rCount,
+			NodesCount: nCount,
+			Size:       fi.Size(),
+			ModTime:    fi.ModTime(),
 		})
 		seen[name] = true
 	}
@@ -1252,12 +1314,19 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 				continue
 			}
 			fullPath := filepath.Join(subConfigsDir, e.Name())
+			note, rCount, nCount := parseProfileMeta(fullPath)
+			if note == "" {
+				note = "用户自定义配置文件"
+			}
 			list = append(list, ConfigProfile{
-				Name:     e.Name(),
-				Path:     fullPath,
-				IsActive: false,
-				Size:     fi.Size(),
-				ModTime:  fi.ModTime(),
+				Name:       e.Name(),
+				Path:       fullPath,
+				IsActive:   false,
+				Note:       note,
+				RulesCount: rCount,
+				NodesCount: nCount,
+				Size:       fi.Size(),
+				ModTime:    fi.ModTime(),
 			})
 			seen[e.Name()] = true
 		}

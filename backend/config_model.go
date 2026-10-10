@@ -2,14 +2,35 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
+
+type DnsUpstreamItem struct {
+	Tag     string `json:"tag"`
+	Address string `json:"address"`
+}
+
+type DnsRequestRule struct {
+	Condition string `json:"condition"`
+	Target    string `json:"target"`
+}
+
+type DnsConfig struct {
+	IpVersionPrefer int               `json:"ipVersionPrefer"`
+	FixedDomainTTL  int               `json:"fixedDomainTTL"`
+	OptimisticCache bool              `json:"optimisticCache"`
+	Upstreams       []DnsUpstreamItem `json:"upstreams"`
+	RequestRules    []DnsRequestRule  `json:"requestRules"`
+	Fallback        string            `json:"fallback"`
+}
 
 // DaeConfigModel represents parsed sections of a dae configuration file.
 type DaeConfigModel struct {
 	Globals       map[string]string `json:"globals"`
 	Subscriptions []ConfigSubItem   `json:"subscriptions"`
 	Nodes         []ConfigNodeItem  `json:"nodes"`
+	Dns           DnsConfig         `json:"dns"`
 	Groups        []ConfigGroupItem `json:"groups"`
 	RoutingRules  []ConfigRouteRule `json:"routingRules"`
 	RawDnsBlock   string            `json:"rawDnsBlock"`
@@ -173,7 +194,137 @@ func parseDaeConfigToModel(text string) DaeConfigModel {
 	}
 
 	model.RawDnsBlock = strings.Join(dnsLines, "\n")
+	model.Dns = parseDnsBlock(dnsLines)
 	return model
+}
+
+func parseDnsBlock(lines []string) DnsConfig {
+	cfg := DnsConfig{
+		IpVersionPrefer: 4,
+		Upstreams:       []DnsUpstreamItem{},
+		RequestRules:    []DnsRequestRule{},
+	}
+	subSection := ""
+
+	for _, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasSuffix(trimmed, "{") {
+			header := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
+			switch header {
+			case "upstream":
+				subSection = "upstream"
+				continue
+			case "request":
+				subSection = "request"
+				continue
+			default:
+				continue
+			}
+		}
+		if trimmed == "}" {
+			if subSection != "" {
+				subSection = ""
+			}
+			continue
+		}
+
+		switch subSection {
+		case "upstream":
+			if k, v, ok := strings.Cut(trimmed, ":"); ok {
+				tag := strings.TrimSpace(k)
+				addr := strings.Trim(strings.TrimSpace(v), "',\"")
+				cfg.Upstreams = append(cfg.Upstreams, DnsUpstreamItem{
+					Tag:     tag,
+					Address: addr,
+				})
+			}
+		case "request":
+			if cond, target, ok := strings.Cut(trimmed, "->"); ok {
+				cfg.RequestRules = append(cfg.RequestRules, DnsRequestRule{
+					Condition: strings.TrimSpace(cond),
+					Target:    strings.TrimSpace(target),
+				})
+			} else if strings.HasPrefix(trimmed, "fallback:") {
+				cfg.Fallback = strings.TrimSpace(strings.TrimPrefix(trimmed, "fallback:"))
+			}
+		default:
+			if strings.HasPrefix(trimmed, "ipversion_prefer:") {
+				val := strings.TrimSpace(strings.TrimPrefix(trimmed, "ipversion_prefer:"))
+				if n, err := strconv.Atoi(val); err == nil {
+					cfg.IpVersionPrefer = n
+				}
+			} else if strings.HasPrefix(trimmed, "fixed_domain_ttl:") {
+				val := strings.TrimSpace(strings.TrimPrefix(trimmed, "fixed_domain_ttl:"))
+				if n, err := strconv.Atoi(val); err == nil {
+					cfg.FixedDomainTTL = n
+				}
+			} else if strings.HasPrefix(trimmed, "optimistic_cache:") {
+				val := strings.TrimSpace(strings.TrimPrefix(trimmed, "optimistic_cache:"))
+				cfg.OptimisticCache = strings.EqualFold(val, "true")
+			}
+		}
+	}
+
+	// Default fallback if empty
+	if cfg.Fallback == "" && len(cfg.Upstreams) > 0 {
+		cfg.Fallback = cfg.Upstreams[len(cfg.Upstreams)-1].Tag
+	}
+	if len(cfg.Upstreams) == 0 {
+		cfg.Upstreams = []DnsUpstreamItem{
+			{Tag: "alidns", Address: "udp://223.5.5.5:53"},
+			{Tag: "googledns", Address: "tcp+udp://dns.google:53"},
+		}
+		cfg.RequestRules = []DnsRequestRule{
+			{Condition: "qname(geosite:cn)", Target: "alidns"},
+		}
+		cfg.Fallback = "googledns"
+	}
+	return cfg
+}
+
+func serializeDnsBlock(dns DnsConfig) string {
+	var sb strings.Builder
+	sb.WriteString("dns {\n")
+	if dns.IpVersionPrefer > 0 {
+		sb.WriteString(fmt.Sprintf("    ipversion_prefer: %d\n", dns.IpVersionPrefer))
+	}
+	if dns.FixedDomainTTL > 0 {
+		sb.WriteString(fmt.Sprintf("    fixed_domain_ttl: %d\n", dns.FixedDomainTTL))
+	}
+	if dns.OptimisticCache {
+		sb.WriteString("    optimistic_cache: true\n")
+	}
+
+	upstreams := dns.Upstreams
+	if len(upstreams) == 0 {
+		upstreams = []DnsUpstreamItem{
+			{Tag: "alidns", Address: "udp://223.5.5.5:53"},
+			{Tag: "googledns", Address: "tcp+udp://dns.google:53"},
+		}
+	}
+	sb.WriteString("    upstream {\n")
+	for _, u := range upstreams {
+		addr := strings.Trim(strings.TrimSpace(u.Address), "'\"")
+		sb.WriteString(fmt.Sprintf("        %s: '%s'\n", u.Tag, addr))
+	}
+	sb.WriteString("    }\n")
+
+	sb.WriteString("    routing {\n        request {\n")
+	for _, r := range dns.RequestRules {
+		sb.WriteString(fmt.Sprintf("            %s -> %s\n", r.Condition, r.Target))
+	}
+	fb := dns.Fallback
+	if fb == "" && len(upstreams) > 0 {
+		fb = upstreams[len(upstreams)-1].Tag
+	}
+	if fb != "" {
+		sb.WriteString(fmt.Sprintf("            fallback: %s\n", fb))
+	}
+	sb.WriteString("        }\n    }\n}\n")
+	return sb.String()
 }
 
 func serializeModelToDae(model DaeConfigModel) string {
@@ -222,26 +373,16 @@ func serializeModelToDae(model DaeConfigModel) string {
 		sb.WriteString("}\n\n")
 	}
 
-	// DNS block (preserve raw block or default)
-	if strings.TrimSpace(model.RawDnsBlock) != "" {
+	// DNS block (use model.Dns if populated or raw)
+	if len(model.Dns.Upstreams) > 0 {
+		sb.WriteString(serializeDnsBlock(model.Dns))
+		sb.WriteString("\n")
+	} else if strings.TrimSpace(model.RawDnsBlock) != "" {
 		sb.WriteString(model.RawDnsBlock)
 		sb.WriteString("\n\n")
 	} else {
-		sb.WriteString(`dns {
-    ipversion_prefer: 4
-    upstream {
-        alidns: 'udp://223.5.5.5:53'
-        googledns: 'tcp+udp://dns.google:53'
-    }
-    routing {
-        request {
-            qname(geosite:cn) -> alidns
-            fallback: googledns
-        }
-    }
-}
-
-`)
+		sb.WriteString(serializeDnsBlock(DnsConfig{}))
+		sb.WriteString("\n")
 	}
 
 	// Group block

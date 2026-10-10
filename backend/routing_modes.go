@@ -38,6 +38,7 @@ type RoutingMode struct {
 	Description string            `json:"description"`
 	Badge       string            `json:"badge"`
 	IsCustom    bool              `json:"isCustom"`
+	DnsSettings DnsConfig         `json:"dnsSettings"`
 	Rules       []RoutingModeRule `json:"rules"`
 	TestResults []FastTestItem    `json:"testResults"`
 }
@@ -62,6 +63,17 @@ func getBuiltinModes() []RoutingMode {
 			Description: "在 gfwlist 列表中被屏蔽或拦截的网站流量走代理，中国大陆及其他网站默认直连",
 			Badge:       "GFW 代理",
 			IsCustom:    false,
+			DnsSettings: DnsConfig{
+				IpVersionPrefer: 4,
+				Upstreams: []DnsUpstreamItem{
+					{Tag: "alidns", Address: "udp://223.5.5.5:53"},
+					{Tag: "googledns", Address: "tcp+udp://dns.google:53"},
+				},
+				RequestRules: []DnsRequestRule{
+					{Condition: "qname(geosite:cn)", Target: "alidns"},
+				},
+				Fallback: "googledns",
+			},
 			Rules: []RoutingModeRule{
 				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq)", Target: "must_direct"},
 				{Condition: "dip(224.0.0.0/3, 'ff00::/8')", Target: "direct"},
@@ -111,6 +123,17 @@ func getBuiltinModes() []RoutingMode {
 			Description: "中国大陆域名与大陆公网 IP 直连，中国列表以外所有境外与未知流量全部走代理 (推荐常用)",
 			Badge:       "绕过大陆",
 			IsCustom:    false,
+			DnsSettings: DnsConfig{
+				IpVersionPrefer: 4,
+				Upstreams: []DnsUpstreamItem{
+					{Tag: "alidns", Address: "udp://223.5.5.5:53"},
+					{Tag: "googledns", Address: "tcp+udp://dns.google:53"},
+				},
+				RequestRules: []DnsRequestRule{
+					{Condition: "qname(geosite:cn)", Target: "alidns"},
+				},
+				Fallback: "googledns",
+			},
 			Rules: []RoutingModeRule{
 				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq)", Target: "must_direct"},
 				{Condition: "dip(224.0.0.0/3, 'ff00::/8')", Target: "direct"},
@@ -159,6 +182,17 @@ func getBuiltinModes() []RoutingMode {
 			Description: "中国大陆网站与大陆 IP 流量定向走代理出口 (回国加速/异地办公)，其他境外网站全部直连",
 			Badge:       "回国代理",
 			IsCustom:    false,
+			DnsSettings: DnsConfig{
+				IpVersionPrefer: 4,
+				Upstreams: []DnsUpstreamItem{
+					{Tag: "googledns", Address: "tcp+udp://dns.google:53"},
+					{Tag: "alidns", Address: "udp://223.5.5.5:53"},
+				},
+				RequestRules: []DnsRequestRule{
+					{Condition: "!qname(geosite:cn)", Target: "googledns"},
+				},
+				Fallback: "alidns",
+			},
 			Rules: []RoutingModeRule{
 				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq)", Target: "must_direct"},
 				{Condition: "dip(224.0.0.0/3, 'ff00::/8')", Target: "direct"},
@@ -201,6 +235,15 @@ func getBuiltinModes() []RoutingMode {
 			Description: "除底层内网私网与协议守护直连外，所有公网网站与网络流量全部强制走代理节点出口",
 			Badge:       "全局代理",
 			IsCustom:    false,
+			DnsSettings: DnsConfig{
+				IpVersionPrefer: 4,
+				Upstreams: []DnsUpstreamItem{
+					{Tag: "googledns", Address: "tcp+udp://dns.google:53"},
+					{Tag: "cfdns", Address: "tcp+udp://1.1.1.1:53"},
+				},
+				RequestRules: []DnsRequestRule{},
+				Fallback:     "googledns",
+			},
 			Rules: []RoutingModeRule{
 				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq)", Target: "must_direct"},
 				{Condition: "dip(224.0.0.0/3, 'ff00::/8')", Target: "direct"},
@@ -364,8 +407,9 @@ func handleApplyRoutingMode(o Options) http.HandlerFunc {
 			return
 		}
 
-		modesMu.Lock()
 		loadCustomModes(o.BackupDir)
+
+		modesMu.Lock()
 		var targetMode *RoutingMode
 		for _, m := range getBuiltinModes() {
 			if m.ID == req.ModeID {
@@ -404,6 +448,10 @@ func handleApplyRoutingMode(o Options) http.HandlerFunc {
 			})
 		}
 		model.RoutingRules = newRules
+		if len(targetMode.DnsSettings.Upstreams) > 0 {
+			model.Dns = targetMode.DnsSettings
+			model.RawDnsBlock = serializeDnsBlock(targetMode.DnsSettings)
+		}
 
 		newContent := serializeModelToDae(model)
 
@@ -438,9 +486,11 @@ func handleApplyRoutingMode(o Options) http.HandlerFunc {
 func handleCreateCustomMode(o Options) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
+			ID          string            `json:"id"`
 			Name        string            `json:"name"`
 			Description string            `json:"description"`
 			Badge       string            `json:"badge"`
+			DnsSettings DnsConfig         `json:"dnsSettings"`
 			Rules       []RoutingModeRule `json:"rules"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
@@ -453,10 +503,28 @@ func handleCreateCustomMode(o Options) http.HandlerFunc {
 			return
 		}
 
-		id := fmt.Sprintf("custom_%d", time.Now().UnixNano()%1000000)
+		id := strings.TrimSpace(req.ID)
+		if id == "" {
+			id = fmt.Sprintf("custom_%d", time.Now().UnixNano()%1000000)
+		}
 		badge := strings.TrimSpace(req.Badge)
 		if badge == "" {
 			badge = "自定义"
+		}
+
+		dnsCfg := req.DnsSettings
+		if len(dnsCfg.Upstreams) == 0 {
+			dnsCfg = DnsConfig{
+				IpVersionPrefer: 4,
+				Upstreams: []DnsUpstreamItem{
+					{Tag: "alidns", Address: "udp://223.5.5.5:53"},
+					{Tag: "googledns", Address: "tcp+udp://dns.google:53"},
+				},
+				RequestRules: []DnsRequestRule{
+					{Condition: "qname(geosite:cn)", Target: "alidns"},
+				},
+				Fallback: "googledns",
+			}
 		}
 
 		// Generate default test items for custom mode
@@ -484,6 +552,7 @@ func handleCreateCustomMode(o Options) http.HandlerFunc {
 			Description: strings.TrimSpace(req.Description),
 			Badge:       badge,
 			IsCustom:    true,
+			DnsSettings: dnsCfg,
 			Rules:       req.Rules,
 			TestResults: testItems,
 		}
