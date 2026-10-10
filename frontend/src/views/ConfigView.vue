@@ -5415,8 +5415,6 @@ onMounted(async () => {
 .rule-cond {
   color: #f1f5f9;
 }
-</style>
-
 
 /* ==================== Profiles List View Styles ==================== */
 .profiles-list-view {
@@ -5721,3 +5719,398 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
 }
+
+/* =========================================================
+   Comprehensive Polish: Utilities, Form Controls & Tables
+   ========================================================= */
+
+/* Typography & Colors */
+.text-primary { color: #0284c7 !important; }
+.text-info { color: #38bdf8 !important; }
+.text-warning { color: #f59e0b !important; }
+.text-muted { color: var(--text-muted, #94a3b8) !important; }
+.text-xs { font-size: 11px !important; }
+.text-sm { font-size: 13px !important; }
+.font-bold { font-weight: 700 !important; }
+.font-semibold { font-weight: 600 !important; }
+.bold { font-weight: 600 !important; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; }
+
+/* Spacing & Layout Utilities */
+.inline-block { display: inline-block !important; }
+.block { display: block !important; }
+.flex-1 { flex: 1 !important; }
+.w-full { width: 100% !important; }
+.w-1\/3 { width: 33.333% !important; }
+.flex-gap { display: flex; align-items: center; gap: 8px; }
+.flex-align-center { display: flex; align-items: center; }
+
+.mb-1 { margin-bottom: 4px !important; }
+.mb-2 { margin-bottom: 8px !important; }
+.mb-3 { margin-bottom: 12px !important; }
+.mb-4 { margin-bottom: 16px !important; }
+.mr-1 { margin-right: 4px !important; }
+.mr-2 { margin-right: 8px !important; }
+.ml-2 { margin-left: 8px !important; }
+.mt-1 { margin-top: 4px !important; }
+.mt-2 { margin-top: 8px !important; }
+.mt-3 { margin-top: 12px !important; }
+.mt-4 { margin-top: 16px !important; }
+.p-3 { padding: 12px !important; }
+
+.bg-subtle { background: rgba(255, 255, 255, 0.03) !important; }
+.border { border: 1px solid var(--border-color, #1e293b) !important; }
+.rounded { border-radius: 8px !important; }
+
+/* Form Controls (Inputs, Selects, Labels) */
+.form-control {
+  width: 100%;
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+  color: var(--text-main, #f8fafc);
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+}
+
+.form-control:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+}
+
+.form-control-sm {
+  padding: 5px 9px !important;
+  font-size: 12px !important;
+  border-radius: 5px !important;
+}
+
+.form-control-xs {
+  padding: 3px 7px !important;
+  font-size: 11px !important;
+  border-radius: 4px !important;
+}
+
+.form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-bottom: 5px;
+}
+
+.form-label.required::after {
+  content: ' *';
+  color: #ef4444;
+  font-weight: bold;
+}
+
+.field-hint, .help-text {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 5px;
+  line-height: 1.4;
+}
+
+/* Profiles Header Actions */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Status Badges */
+.badge-active-prominent {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 9999px;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
+  white-space: nowrap;
+}
+
+.badge-inactive {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.1);
+  border: 1px solid rgba(100, 116, 139, 0.25);
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+/* Sub-nav Tab Active Badge */
+.badge-active-mode {
+  background: rgba(16, 185, 129, 0.2) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.4) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  border-radius: 9999px !important;
+  padding: 1px 7px !important;
+}
+
+/* DNS Table Inputs Styling */
+.dns-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dns-table th {
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.25);
+  text-align: left;
+  font-weight: 600;
+  color: #94a3b8;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+}
+
+.dns-table td {
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+.dns-table td .form-control {
+  background: var(--bg-input, #090d16);
+  border-color: #334155;
+}
+
+.dns-table td .form-control:focus {
+  border-color: #0284c7;
+}
+
+.dns-panel-box {
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 10px;
+  padding: 18px 22px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.dns-panel-title {
+  margin: 0 0 14px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+  display: flex;
+  align-items: center;
+}
+
+/* Modals & Backdrop */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999 !important;
+}
+
+.modal-notice-text {
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+  padding: 8px 12px;
+  background: rgba(2, 132, 199, 0.08);
+  border-left: 3px solid #0284c7;
+  border-radius: 0 6px 6px 0;
+}
+
+.mode-config-section {
+  background: rgba(0, 0, 0, 0.25) !important;
+  border: 1px solid var(--border-color, #1e293b) !important;
+  border-radius: 8px;
+}
+
+.mode-dns-preview-card {
+  background: rgba(0, 0, 0, 0.25) !important;
+  border: 1px solid var(--border-color, #1e293b) !important;
+  border-radius: 8px;
+}
+
+/* Sub-nodes modal table */
+.sub-summary {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.sub-nodes-modal {
+  padding: 16px 20px;
+}
+
+/* Target select in route modal */
+.target-select {
+  width: 100%;
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+  color: var(--text-main, #f8fafc);
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+
+
+/* Additional Controls, Tabs & Table Cells */
+.btn-sm {
+  padding: 5px 12px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  border-radius: 6px !important;
+}
+
+.btn-xs {
+  padding: 3px 8px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  border-radius: 4px !important;
+}
+
+.modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.idx-cell {
+  width: 50px;
+  text-align: center;
+  color: #64748b;
+}
+
+.idx-num {
+  display: inline-block;
+  font-size: 11px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cond-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.rule-target {
+  padding: 8px 12px;
+}
+
+.profile-name-cell {
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.profile-note-cell {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.action-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.address-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.backup-list-box {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-top: 12px;
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 8px;
+}
+
+.route-input-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #1e293b);
+}
+
+.tab-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-pill.active {
+  background: var(--bg-card, #1e293b);
+  color: #0284c7;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.preset-tip-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #38bdf8;
+}
+
+.preview-header {
+  display: flex;
+  align-items: center;
+}
+
+.preview-content {
+  padding: 8px 0;
+}
+
+.dns-preview-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detail-text {
+  font-size: 11px;
+  color: #64748b;
+}
+
+</style>
