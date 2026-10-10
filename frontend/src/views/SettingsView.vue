@@ -678,15 +678,20 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  width: 100%;
   background: var(--bg-main, #090d16);
   color: var(--text-main, #f8fafc);
   overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .settings-header {
   padding: 18px 24px;
   background: var(--bg-card, #0f172a);
   border-bottom: 1px solid var(--border-color, #1e293b);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .settings-header h2 {
@@ -707,7 +712,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 960px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .settings-card {
@@ -715,6 +721,8 @@ onMounted(() => {
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 10px;
   padding: 20px;
+  width: 100%;
+  box-sizing: border-box;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
@@ -1082,7 +1090,9 @@ input:checked + .slider:before {
 .backup-table-wrapper {
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
   background: var(--bg-card, #0f172a);
 }
 

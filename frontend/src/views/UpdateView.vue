@@ -644,13 +644,16 @@ onMounted(() => {
 <style scoped>
 .update-view {
   height: 100%;
+  width: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg-main, #090d16);
   color: var(--text-main, #f8fafc);
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px;
   gap: 20px;
+  box-sizing: border-box;
 }
 
 /* Header */
@@ -658,6 +661,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .title-row {
@@ -726,7 +731,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 1080px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .update-card {
@@ -737,6 +743,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
   transition: background-color 0.2s, border-color 0.2s;
 }
 
@@ -907,10 +915,13 @@ onMounted(() => {
 }
 
 /* Rules Table */
-.table-wrap {
+.table-wrap,
+.rules-table-box {
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
 }
 
 .rules-table {
