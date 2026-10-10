@@ -76,13 +76,14 @@ sudo ./install.sh [命令] [选项]
 | 命令 | 说明 |
 |---|---|
 | `install` | 检查环境、安装程序并注册 systemd 服务（默认） |
+| `doctor` / `check` | 系统运行环境与健康自检（内核、eBPF、配置语法、服务等） |
 | `update` | 检查并拉取最新版本更新程序 |
 | `restart` | 重启 dae-webui 服务 |
 | `status` | 查看当前 dae-webui 服务运行状态与资源占用 |
 | `logs` | 实时跟踪查看 dae-webui 的 systemd 服务日志 |
 | `stop` | 停止 dae-webui 服务 |
 | `start` | 启动 dae-webui 服务 |
-| `uninstall` | 安全卸载服务并清理二进制文件（保留用户配置） |
+| `uninstall` | 安全卸载服务并清理二进制文件（默认保留用户配置） |
 
 ### 选项说明
 
@@ -145,6 +146,60 @@ systemctl enable dae-webui
 | `-dae-service` | `DAE_SERVICE` | `dae` | 底层由 systemd 托管的 dae 服务名称 |
 | `-backup-dir` | `DAE_BACKUP_DIR` | `<config_dir>/backups` | 配置文件历史备份与快照目录 |
 | `-allow-system-config` | - | `false` | 允许直接加载 `/usr/local/etc/dae/` 生产目录中的配置文件 |
+
+---
+
+## 🩺 系统自检与运行环境诊断 (Doctor / Self-Check)
+
+dae 基于 Linux 内核 eBPF 技术，对操作系统内核版本、BPF 文件系统挂载及路由规则格式有特定要求。项目提供命令行与 Web 控制台双模自检诊断：
+
+### 1. 命令行自检
+```bash
+# 方式一：使用安装管理脚本
+sudo ./install.sh doctor
+
+# 方式二：直接执行自检脚本
+sudo ./scripts/doctor.sh
+
+# 方式三：开发者环境
+make doctor
+```
+
+自检项目涵盖：
+- ✅ **Linux 内核与架构**（要求 Linux 5.8+，推荐 5.15+）
+- ✅ **eBPF 文件系统**（验证 `/sys/fs/bpf` 挂载状态）
+- ✅ **systemd 服务管理器**（运行模式与服务就绪度）
+- ✅ **dae 核心主程序**（二进制执行权限与版本）
+- ✅ **dae 配置文件语法**（自动调用 `dae validate -c` 检测合法性）
+- ✅ **路由规则库资源**（检查 `geosite.dat` 与 `geoip.dat` 完整性）
+- ✅ **dae-webui 服务运行状态**（systemd 活跃度与 HTTP 端口监听）
+- ✅ **默认出口网络路由**（检查默认网关与对外接口）
+- ✅ **配置安全权限**（验证敏感配置文件权限是否符合 `0600`）
+
+### 2. WebUI 网页一键自检
+在管理后台左侧导航栏 **「服务管理」** 页面，点击顶部 **「🩺 系统自检」** 按钮，即可实时触发多维度健康诊断并弹出可视化体检报告，支持一键复制体检报告用于运维排障。
+
+---
+
+## 🗑️ 安全卸载与清理 (Uninstall)
+
+项目提供独立的卸载脚本 `uninstall.sh`，同时也支持通过 `./install.sh uninstall` 执行：
+
+### 1. 标准卸载（推荐，保留配置与数据）
+停止并注销 systemd 服务，移除可执行二进制文件与系统服务文件，**完整保留** `/etc/dae-webui/` 配置文件与日志数据：
+```bash
+sudo ./uninstall.sh
+# 或
+sudo ./install.sh uninstall
+```
+
+### 2. 彻底清除卸载（Purge）
+如需连同所有配置文件、规则草稿、备份快照和日志文件一并清除：
+```bash
+sudo ./uninstall.sh --purge
+# 或静默非交互式彻底清理：
+sudo ./uninstall.sh -y --purge
+```
 
 ---
 

@@ -22,7 +22,7 @@ RSYNC_EXCLUDES := --exclude .git/ --exclude node_modules/ --exclude backend/tmp/
                   --exclude backend/internal/webui/dist/ --exclude '*.log' --exclude .DS_Store
 
 .PHONY: sync watch dev-setup dev-restart dev-stop logs status deploy ssh pull-lock \
-        install uninstall package vm-deps vm-dev-install vm-build vm-deploy
+        install uninstall package doctor check vm-deps vm-dev-install vm-build vm-deploy
 
 # ---------------- local ----------------
 sync:
@@ -67,6 +67,12 @@ uninstall:
 
 package:
 	@./scripts/build-release.sh
+
+doctor:
+	@./scripts/doctor.sh
+
+check:
+	@./scripts/doctor.sh
 
 # ---------------- on VM ----------------
 vm-deps:

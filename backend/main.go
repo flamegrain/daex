@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -335,13 +336,20 @@ func parseNodeURL(key, rawURL string) NodeItem {
 func main() {
 	var o Options
 	var allowSystemConfig bool
+	var showVersion bool
 	flag.StringVar(&o.Listen, "listen", envOr("DAE_WEBUI_LISTEN", "0.0.0.0:9091"), "HTTP listen address")
 	flag.StringVar(&o.DaeBin, "dae-bin", envOr("DAE_BIN", "/usr/local/bin/dae"), "path to dae binary")
 	flag.StringVar(&o.DaeConfig, "dae-config", envOr("DAE_CONFIG", ""), "path to dae config (dev/test: config.mock.dae)")
 	flag.StringVar(&o.DaeService, "dae-service", envOr("DAE_SERVICE", "dae"), "systemd unit name of dae")
 	flag.StringVar(&o.BackupDir, "backup-dir", envOr("DAE_BACKUP_DIR", ""), "directory to store backups (defaults to <config_dir>/backups)")
 	flag.BoolVar(&allowSystemConfig, "allow-system-config", false, "allow using a config under "+systemConfigDir+" (production only)")
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Printf("dae-webui %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		return
+	}
 	if abs, err := filepath.Abs(o.DaeConfig); err == nil {
 		o.DaeConfig = abs
 	}
@@ -373,6 +381,7 @@ func main() {
 	mux.HandleFunc("GET /api/service/status", handleGetServicesOverview(o))
 	mux.HandleFunc("POST /api/service/action", handleServiceAction(o))
 	mux.HandleFunc("GET /api/service/logs", handleGetServiceLogs(o))
+	mux.HandleFunc("GET /api/system/doctor", handleGetSystemDoctor(o))
 
 	// 2. Dashboard metrics (Traffic, Nodes, Groups)
 	mux.HandleFunc("GET /api/dashboard", func(w http.ResponseWriter, r *http.Request) {

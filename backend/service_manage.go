@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -404,6 +405,205 @@ func handleGetServiceLogs(o Options) http.HandlerFunc {
 			"serviceName": serviceName,
 			"lines":       len(logLines),
 			"logs":        logLines,
+		})
+	}
+}
+
+type DoctorCheckItem struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Status  string `json:"status"` // "pass", "warn", "fail"
+	Message string `json:"message"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+type DoctorReport struct {
+	Timestamp string            `json:"timestamp"`
+	Status    string            `json:"status"` // "healthy", "warning", "error"
+	Summary   map[string]int    `json:"summary"`
+	Checks    []DoctorCheckItem `json:"checks"`
+}
+
+func handleGetSystemDoctor(o Options) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		defer cancel()
+
+		var checks []DoctorCheckItem
+		passed := 0
+		warnings := 0
+		failed := 0
+
+		addCheck := func(id, name, status, msg, detail string) {
+			checks = append(checks, DoctorCheckItem{
+				ID:      id,
+				Name:    name,
+				Status:  status,
+				Message: msg,
+				Detail:  detail,
+			})
+			switch status {
+			case "pass":
+				passed++
+			case "warn":
+				warnings++
+			default:
+				failed++
+			}
+		}
+
+		// 1. Kernel & eBPF
+		kernelVer := ""
+		if out, err := exec.CommandContext(ctx, "uname", "-r").Output(); err == nil {
+			kernelVer = strings.TrimSpace(string(out))
+		}
+		bpffsMounted := false
+		if out, err := exec.CommandContext(ctx, "mount").Output(); err == nil {
+			if strings.Contains(string(out), "type bpf") {
+				bpffsMounted = true
+			}
+		}
+
+		if runtime.GOOS == "linux" {
+			if bpffsMounted {
+				addCheck("kernel", "Linux 内核与 eBPF 支持", "pass",
+					fmt.Sprintf("Linux %s (%s), BPF 文件系统已就绪 (/sys/fs/bpf)", kernelVer, runtime.GOARCH), "")
+			} else {
+				addCheck("kernel", "Linux 内核与 eBPF 支持", "warn",
+					fmt.Sprintf("Linux %s (%s), 但未检测到 /sys/fs/bpf 挂载", kernelVer, runtime.GOARCH), "请检查内核配置或执行 mount -t bpf bpf /sys/fs/bpf")
+			}
+		} else {
+			addCheck("kernel", "Linux 内核与 eBPF 支持", "fail",
+				fmt.Sprintf("非 Linux 环境 (%s/%s)，dae 仅支持 Linux 内核", runtime.GOOS, runtime.GOARCH), "")
+		}
+
+		// 2. systemd
+		if _, err := os.Stat("/run/systemd/system"); err == nil {
+			addCheck("systemd", "systemd 服务管理器", "pass", "systemd 守护进程正常活跃运行", "")
+		} else {
+			addCheck("systemd", "systemd 服务管理器", "warn", "未检测到 /run/systemd/system 守护进程目录", "后台守护功能可能受限")
+		}
+
+		// 3. dae Core
+		if _, err := os.Stat(o.DaeBin); err == nil {
+			daeVer := ""
+			if out, err := exec.CommandContext(ctx, o.DaeBin, "--version").Output(); err == nil {
+				daeVer = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+			}
+			daeActive := false
+			if out, err := exec.CommandContext(ctx, "systemctl", "is-active", o.DaeService).Output(); err == nil {
+				daeActive = strings.TrimSpace(string(out)) == "active"
+			}
+			if daeActive {
+				addCheck("dae_core", "dae 核心程序与服务", "pass",
+					fmt.Sprintf("%s (运行中 active/running)", daeVer), o.DaeBin)
+			} else {
+				addCheck("dae_core", "dae 核心程序与服务", "warn",
+					fmt.Sprintf("%s 已安装，但 %s 服务当前未运行", daeVer, o.DaeService), "可点击服务管理中的「启动服务」")
+			}
+		} else {
+			addCheck("dae_core", "dae 核心程序与服务", "fail",
+				fmt.Sprintf("未找到 dae 可执行文件: %s", o.DaeBin), "请检查 dae 是否正确安装到 /usr/local/bin/dae")
+		}
+
+		// 4. dae Config
+		if info, err := os.Stat(o.DaeConfig); err == nil {
+			perm := fmt.Sprintf("%04o", info.Mode().Perm())
+			content, err := os.ReadFile(o.DaeConfig)
+			if err != nil {
+				addCheck("dae_config", "dae 配置文件与语法校验", "fail", "无法读取配置文件", err.Error())
+			} else {
+				valid, valMsg := validateDaeConfig(ctx, o.DaeBin, string(content))
+				if valid {
+					status := "pass"
+					if perm != "0600" && perm != "600" {
+						status = "warn"
+						addCheck("dae_config", "dae 配置文件与语法校验", status,
+							fmt.Sprintf("语法校验通过，但文件权限为 %s (建议 0600)", perm), o.DaeConfig)
+					} else {
+						addCheck("dae_config", "dae 配置文件与语法校验", status,
+							fmt.Sprintf("语法校验全部通过，安全权限 0600 (%s)", filepath.Base(o.DaeConfig)), o.DaeConfig)
+					}
+				} else {
+					addCheck("dae_config", "dae 配置文件与语法校验", "fail", "配置语法校验存在错误", valMsg)
+				}
+			}
+		} else {
+			addCheck("dae_config", "dae 配置文件与语法校验", "fail",
+				fmt.Sprintf("配置文件不存在: %s", o.DaeConfig), "")
+		}
+
+		// 5. GeoIP & GeoSite
+		geositePath := ""
+		geoipPath := ""
+		datDirs := []string{"/usr/local/share/dae", "/usr/share/dae", "/etc/dae", "/usr/local/etc/dae", "/var/lib/dae"}
+		for _, d := range datDirs {
+			if geositePath == "" {
+				p := filepath.Join(d, "geosite.dat")
+				if _, err := os.Stat(p); err == nil {
+					geositePath = p
+				}
+			}
+			if geoipPath == "" {
+				p := filepath.Join(d, "geoip.dat")
+				if _, err := os.Stat(p); err == nil {
+					geoipPath = p
+				}
+			}
+		}
+		if geositePath != "" && geoipPath != "" {
+			addCheck("geo_assets", "分流规则库 (GeoIP / GeoSite)", "pass",
+				"geosite.dat 与 geoip.dat 规则数据库均已就绪",
+				fmt.Sprintf("Site: %s | IP: %s", geositePath, geoipPath))
+		} else if geositePath != "" || geoipPath != "" {
+			addCheck("geo_assets", "分流规则库 (GeoIP / GeoSite)", "warn",
+				"规则库部分就绪 (部分 dat 缺失)",
+				fmt.Sprintf("Site: %s | IP: %s", geositePath, geoipPath))
+		} else {
+			addCheck("geo_assets", "分流规则库 (GeoIP / GeoSite)", "warn",
+				"未在系统标准路径中检测到 geosite.dat 或 geoip.dat",
+				"可在「系统更新」中一键下载更新规则库")
+		}
+
+		// 6. WebUI
+		addCheck("webui_service", "WebUI 控制台服务状态", "pass",
+			fmt.Sprintf("监听于 %s, PID: %d, 版本: %s", o.Listen, os.Getpid(), version),
+			fmt.Sprintf("Go %s (%s)", runtime.Version(), runtime.GOARCH))
+
+		// 7. Network default route
+		if out, err := exec.CommandContext(ctx, "ip", "route", "show", "default").Output(); err == nil && len(out) > 0 {
+			line := strings.TrimSpace(strings.Split(string(out), "\n")[0])
+			addCheck("network", "默认外网出口网卡", "pass", line, "")
+		} else {
+			addCheck("network", "默认外网出口网卡", "warn", "未获取到系统默认网关路由", "")
+		}
+
+		// 8. Storage
+		if err := os.MkdirAll(o.BackupDir, 0700); err == nil {
+			addCheck("storage", "数据与备份存储目录", "pass",
+				fmt.Sprintf("备份目录正常可读写: %s", o.BackupDir), "")
+		} else {
+			addCheck("storage", "数据与备份存储目录", "warn",
+				fmt.Sprintf("备份目录不可写: %v", err), o.BackupDir)
+		}
+
+		overall := "healthy"
+		if failed > 0 {
+			overall = "error"
+		} else if warnings > 0 {
+			overall = "warning"
+		}
+
+		writeJSON(w, http.StatusOK, DoctorReport{
+			Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+			Status:    overall,
+			Summary: map[string]int{
+				"total":   len(checks),
+				"passed":  passed,
+				"warning": warnings,
+				"failed":  failed,
+			},
+			Checks: checks,
 		})
 	}
 }

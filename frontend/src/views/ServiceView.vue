@@ -19,7 +19,9 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
-  Pause
+  Pause,
+  Stethoscope,
+  X
 } from 'lucide-vue-next'
 import { t } from '../composables/useSettings'
 
@@ -83,6 +85,61 @@ function showToast(type: 'success' | 'error', message: string) {
 const restartingWebui = ref(false)
 const reconnectElapsed = ref(0)
 let reconnectTimer: any = null
+
+// Doctor Self-Check State
+interface DoctorCheckItem {
+  id: string
+  name: string
+  status: 'pass' | 'warn' | 'fail'
+  message: string
+  detail?: string
+}
+
+interface DoctorReport {
+  timestamp: string
+  status: 'healthy' | 'warning' | 'error'
+  summary: {
+    total: number
+    passed: number
+    warning: number
+    failed: number
+  }
+  checks: DoctorCheckItem[]
+}
+
+const showDoctorModal = ref(false)
+const runningDoctor = ref(false)
+const doctorReport = ref<DoctorReport | null>(null)
+const doctorReportCopied = ref(false)
+
+async function runSystemDoctor() {
+  runningDoctor.value = true
+  showDoctorModal.value = true
+  try {
+    const res = await fetch('/api/system/doctor')
+    if (res.ok) {
+      doctorReport.value = await res.json()
+    }
+  } catch (err) {
+    console.error('Run system doctor error:', err)
+  } finally {
+    runningDoctor.value = false
+  }
+}
+
+function copyDoctorReport() {
+  if (!doctorReport.value) return
+  let text = `=== dae-webui 系统运行环境与健康自检报告 ===\n时间: ${doctorReport.value.timestamp}\n总体状态: ${doctorReport.value.status}\n检查统计: 共 ${doctorReport.value.summary.total} 项 (通过: ${doctorReport.value.summary.passed}, 警告: ${doctorReport.value.summary.warning}, 失败: ${doctorReport.value.summary.failed})\n\n详细检查项:\n`
+  for (const c of doctorReport.value.checks) {
+    text += `[${c.status.toUpperCase()}] ${c.name}: ${c.message} ${c.detail ? '(' + c.detail + ')' : ''}\n`
+  }
+  navigator.clipboard.writeText(text).then(() => {
+    doctorReportCopied.value = true
+    setTimeout(() => {
+      doctorReportCopied.value = false
+    }, 2000)
+  })
+}
 
 async function fetchServiceStatus(showSpinner = false) {
   if (showSpinner) loading.value = true
@@ -261,6 +318,17 @@ onUnmounted(() => {
         >
           <component :is="autoPoll ? Pause : Play" :size="13" />
           <span>{{ t('service.auto_refresh') }} ({{ autoPoll ? '开' : '关' }})</span>
+        </button>
+
+        <!-- Doctor Self-Check Button -->
+        <button
+          class="btn btn-primary btn-sm btn-doctor"
+          :disabled="runningDoctor"
+          @click="runSystemDoctor"
+          :title="t('service.doctor_btn')"
+        >
+          <Stethoscope :size="13" :class="{ spin: runningDoctor }" />
+          <span>{{ runningDoctor ? t('service.doctor_running') : t('service.doctor_btn') }}</span>
         </button>
 
         <!-- Manual Refresh Button -->
@@ -621,6 +689,104 @@ onUnmounted(() => {
         <p>{{ t('service.restarting_webui_desc', { seconds: reconnectElapsed }) }}</p>
         <div class="reconnect-bar">
           <div class="bar-progress"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Doctor Modal -->
+    <div v-if="showDoctorModal" class="doctor-modal-backdrop" @click.self="showDoctorModal = false">
+      <div class="doctor-modal-card">
+        <div class="doctor-modal-header">
+          <div class="modal-title-wrap">
+            <Stethoscope :size="20" class="doctor-modal-icon" />
+            <h3>{{ t('service.doctor_title') }}</h3>
+          </div>
+          <button class="btn-close" @click="showDoctorModal = false" :title="t('service.doctor_close')">
+            <X :size="18" />
+          </button>
+        </div>
+
+        <div class="doctor-modal-body">
+          <div v-if="runningDoctor" class="doctor-loading">
+            <RefreshCw :size="32" class="spin text-primary" />
+            <p>{{ t('service.doctor_running') }}</p>
+          </div>
+
+          <div v-else-if="doctorReport" class="doctor-report-content">
+            <!-- Summary Banner -->
+            <div
+              class="doctor-summary-banner"
+              :class="`status-${doctorReport.status}`"
+            >
+              <div class="summary-left">
+                <CheckCircle2 v-if="doctorReport.status === 'healthy'" :size="24" class="status-icon text-success" />
+                <AlertTriangle v-else-if="doctorReport.status === 'warning'" :size="24" class="status-icon text-warning" />
+                <AlertTriangle v-else :size="24" class="status-icon text-danger" />
+                <div>
+                  <div class="summary-status-text">
+                    {{ doctorReport.status === 'healthy' ? t('service.doctor_healthy') : (doctorReport.status === 'warning' ? t('service.doctor_warning') : t('service.doctor_error')) }}
+                  </div>
+                  <div class="summary-subtitle">
+                    {{ doctorReport.timestamp }}
+                  </div>
+                </div>
+              </div>
+              <div class="summary-counts">
+                <span class="count-tag passed">✓ {{ doctorReport.summary.passed }}</span>
+                <span v-if="doctorReport.summary.warning > 0" class="count-tag warning">⚠ {{ doctorReport.summary.warning }}</span>
+                <span v-if="doctorReport.summary.failed > 0" class="count-tag failed">✕ {{ doctorReport.summary.failed }}</span>
+              </div>
+            </div>
+
+            <!-- Checks List -->
+            <div class="doctor-checks-list">
+              <div
+                v-for="item in doctorReport.checks"
+                :key="item.id"
+                class="doctor-check-item"
+                :class="`item-${item.status}`"
+              >
+                <div class="item-status-icon">
+                  <CheckCircle2 v-if="item.status === 'pass'" :size="16" class="text-success" />
+                  <AlertTriangle v-else-if="item.status === 'warn'" :size="16" class="text-warning" />
+                  <AlertTriangle v-else :size="16" class="text-danger" />
+                </div>
+                <div class="item-content">
+                  <div class="item-header">
+                    <span class="item-name">{{ item.name }}</span>
+                    <span class="item-status-badge" :class="item.status">{{ item.status.toUpperCase() }}</span>
+                  </div>
+                  <div class="item-message">{{ item.message }}</div>
+                  <div v-if="item.detail" class="item-detail">{{ item.detail }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="doctor-modal-footer">
+          <div class="footer-left">
+            <button
+              class="btn btn-secondary btn-sm"
+              :disabled="runningDoctor"
+              @click="runSystemDoctor"
+            >
+              <RefreshCw :size="14" :class="{ spin: runningDoctor }" />
+              <span>{{ t('service.doctor_refresh') }}</span>
+            </button>
+            <button
+              v-if="doctorReport"
+              class="btn btn-secondary btn-sm"
+              @click="copyDoctorReport"
+            >
+              <CheckCircle2 v-if="doctorReportCopied" :size="14" class="text-success" />
+              <Copy v-else :size="14" />
+              <span>{{ doctorReportCopied ? t('service.doctor_copied') : t('service.doctor_copy') }}</span>
+            </button>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="showDoctorModal = false">
+            {{ t('service.doctor_close') }}
+          </button>
         </div>
       </div>
     </div>
@@ -1279,5 +1445,320 @@ onUnmounted(() => {
 
 [data-theme="light"] .reconnect-modal h3 {
   color: #0f172a !important;
+}
+
+/* Doctor Modal Styles */
+.doctor-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.doctor-modal-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.doctor-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.doctor-modal-icon {
+  color: #0284c7;
+}
+
+.doctor-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.btn-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+}
+
+.doctor-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.doctor-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 16px;
+  color: #94a3b8;
+  font-size: 0.95rem;
+}
+
+.doctor-report-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.doctor-summary-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.doctor-summary-banner.status-healthy {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.doctor-summary-banner.status-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.doctor-summary-banner.status-error {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.summary-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.summary-status-text {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #f8fafc;
+}
+
+.summary-subtitle {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.summary-counts {
+  display: flex;
+  gap: 6px;
+}
+
+.count-tag {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-weight: 500;
+}
+
+.count-tag.passed {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.count-tag.warning {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+.count-tag.failed {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.doctor-checks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doctor-check-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  transition: all 0.2s;
+}
+
+.doctor-check-item.item-warn {
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.doctor-check-item.item-fail {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.item-status-icon {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.item-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: #f1f5f9;
+}
+
+.item-status-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.item-status-badge.pass,
+.item-status-badge.ok {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.item-status-badge.warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.item-status-badge.fail {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.item-message {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.item-detail {
+  font-size: 0.76rem;
+  color: #94a3b8;
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.doctor-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid #1e293b;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.footer-left {
+  display: flex;
+  gap: 8px;
+}
+
+/* Light Theme Overrides for Doctor Modal */
+[data-theme="light"] .doctor-modal-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .doctor-modal-header {
+  border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .doctor-modal-header h3 {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .btn-close {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .btn-close:hover {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .summary-status-text {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .doctor-check-item {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .item-name {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .item-message {
+  color: #334155 !important;
+}
+
+[data-theme="light"] .item-detail {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+}
+
+[data-theme="light"] .doctor-modal-footer {
+  border-top-color: #e2e8f0 !important;
+  background: #f8fafc !important;
 }
 </style>

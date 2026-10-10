@@ -550,6 +550,16 @@ const messages: Record<LangType, Record<string, string>> = {
     'service.logs_copy': '复制日志',
     'service.logs_refresh': '刷新日志',
     'service.logs_copied': '服务日志已成功复制到剪贴板',
+    'service.doctor_btn': '系统自检',
+    'service.doctor_running': '诊断中...',
+    'service.doctor_title': '系统运行环境与健康自检报告',
+    'service.doctor_healthy': '系统环境非常健康，所有检查项均通过！',
+    'service.doctor_warning': '系统检测到部分优化项，建议查看详情。',
+    'service.doctor_error': '检测到存在未通过项，需优先排查处理。',
+    'service.doctor_refresh': '重新自检',
+    'service.doctor_copy': '复制体检报告',
+    'service.doctor_copied': '体检报告已复制到剪贴板',
+    'service.doctor_close': '关闭报告',
 
     // System Update
     'update.title': '系统更新',
@@ -1286,6 +1296,16 @@ const messages: Record<LangType, Record<string, string>> = {
     'service.logs_copy': 'Copy Logs',
     'service.logs_refresh': 'Refresh Logs',
     'service.logs_copied': 'Service logs copied to clipboard',
+    'service.doctor_btn': 'Self-Check',
+    'service.doctor_running': 'Diagnosing...',
+    'service.doctor_title': 'System Environment & Health Diagnostic Report',
+    'service.doctor_healthy': 'System environment is healthy, all checks passed!',
+    'service.doctor_warning': 'Some warnings detected, please review details.',
+    'service.doctor_error': 'Critical issues detected, attention required.',
+    'service.doctor_refresh': 'Re-check',
+    'service.doctor_copy': 'Copy Report',
+    'service.doctor_copied': 'Report copied to clipboard',
+    'service.doctor_close': 'Close Report',
 
     // System Update
     'update.title': 'System Update',

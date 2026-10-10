@@ -339,6 +339,12 @@ show_welcome_banner() {
 
 # 卸载逻辑
 do_uninstall() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -f "${script_dir}/uninstall.sh" ]]; then
+        exec "${script_dir}/uninstall.sh" "$@"
+    fi
+
     check_root
     echo -e "${YELLOW}警告: 即将卸载 ${APP_NAME} 服务及相关二进制文件！${NC}"
     if [[ "${NON_INTERACTIVE}" != "true" ]]; then
@@ -372,7 +378,8 @@ dae-webui 自动化安装与运维部署脚本
 命令:
   install       安装并配置 dae-webui（默认命令）
   update        在线拉取或就地重新编译升级
-  uninstall     卸载 dae-webui 服务及二进制
+  doctor, check 执行环境自检与健康诊断报告
+  uninstall     卸载 dae-webui 服务及二进制 (可接 --purge)
   start         启动服务
   stop          停止服务
   restart       重启服务
@@ -387,12 +394,14 @@ dae-webui 自动化安装与运维部署脚本
   --bin <PATH>         指定 dae 可执行文件路径 (默认: /usr/local/bin/dae)
   --service <NAME>     指定底层 dae systemd 服务名称 (默认: dae)
   --version <VERSION>  指定安装 Release 版本 (默认: latest)
+  --purge              卸载时彻底删除配置文件和备份数据
   --no-start           安装后不立即启动
   -y, --yes            非交互式安装，无需手动确认
 
 示例:
   $0 install --port 9091
-  $0 install --config /usr/local/etc/dae/config.dae
+  $0 doctor
+  $0 uninstall --purge
   $0 restart
   $0 logs
 EOF
@@ -402,10 +411,11 @@ EOF
 COMMAND="install"
 NON_INTERACTIVE="false"
 NO_START="false"
+PURGE_FLAG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        install|update|uninstall|start|stop|restart|status|logs)
+        install|update|uninstall|start|stop|restart|status|logs|doctor|check)
             COMMAND="$1"
             shift
             ;;
@@ -433,6 +443,10 @@ while [[ $# -gt 0 ]]; do
             SPECIFIED_VERSION="$2"
             shift 2
             ;;
+        --purge)
+            PURGE_FLAG="--purge"
+            shift
+            ;;
         --no-start)
             NO_START="true"
             shift
@@ -454,6 +468,28 @@ done
 
 # 主流程路由
 case "${COMMAND}" in
+    doctor|check)
+        local_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -f "${local_dir}/scripts/doctor.sh" ]]; then
+            exec "${local_dir}/scripts/doctor.sh"
+        elif [[ -f "${local_dir}/doctor.sh" ]]; then
+            exec "${local_dir}/doctor.sh"
+        else
+            fatal "未找到 doctor.sh 自检诊断脚本！"
+        fi
+        ;;
+
+    uninstall)
+        local_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -f "${local_dir}/uninstall.sh" ]]; then
+            args=()
+            [[ "${NON_INTERACTIVE}" == "true" ]] && args+=("-y")
+            [[ -n "${PURGE_FLAG}" ]] && args+=("${PURGE_FLAG}")
+            exec "${local_dir}/uninstall.sh" "${args[@]}"
+        fi
+        do_uninstall
+        ;;
+
     install|update)
         check_root
         check_environment
