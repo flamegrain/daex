@@ -587,9 +587,16 @@ async function activateSelectedProfile(name?: string) {
     })
     const data = await res.json()
     if (res.ok) {
+      if (data.configs) {
+        configProfiles.value = data.configs
+      }
+      activeRunningConfig.value = data.currentActive || target
+      selectedProfileNames.value = selectedProfileNames.value.filter(n => n !== target)
       alert(t('config.activate_success', { message: data.message || '' }))
       await fetchConfigProfiles()
-      await loadConfig(target)
+      if (viewLevel.value === 'detail') {
+        await loadConfig(target)
+      }
     } else {
       alert(t('config.activate_fail', { error: data.error || '', details: data.details || '' }))
     }

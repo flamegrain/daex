@@ -549,7 +549,7 @@ func main() {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"configs":       profiles,
-			"currentActive": filepath.Base(o.DaeConfig),
+			"currentActive": getActiveProfile(o.DaeConfig),
 		})
 	})
 
@@ -581,10 +581,11 @@ func main() {
 		var req struct {
 			Name string `json:"name"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name is required"})
 			return
 		}
+		req.Name = filepath.Base(strings.TrimSpace(req.Name))
 		targetPath := resolveProfilePath(o.DaeConfig, req.Name)
 		if _, err := os.Stat(targetPath); err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "config file not found: " + req.Name})
@@ -603,6 +604,15 @@ func main() {
 			return
 		}
 
+		// Sync current active config content to previously active profile in configs/ if different
+		oldActive := getActiveProfile(o.DaeConfig)
+		if oldActive != "" && oldActive != req.Name {
+			oldPath := resolveProfilePath(o.DaeConfig, oldActive)
+			if currContent, err := os.ReadFile(o.DaeConfig); err == nil {
+				_ = os.WriteFile(oldPath, currContent, 0600)
+			}
+		}
+
 		// Backup currently active config before replacing
 		_, _ = createBackupFile(o.DaeConfig, o.BackupDir, "pre-switch")
 
@@ -610,6 +620,11 @@ func main() {
 		if err := os.WriteFile(o.DaeConfig, b, 0600); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to overwrite active config: " + err.Error()})
 			return
+		}
+
+		// Record new active profile name
+		if err := setActiveProfile(o.DaeConfig, req.Name); err != nil {
+			log.Printf("failed to set active profile: %v", err)
 		}
 
 		// Reload dae service
@@ -624,11 +639,15 @@ func main() {
 			reloaded = true
 		}
 
+		freshProfiles, _ := listConfigProfiles(o.DaeConfig)
+
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":        true,
-			"message":   fmt.Sprintf("已成功切换并生效配置 [%s]", req.Name),
-			"reloaded":  reloaded,
-			"reloadMsg": reloadMsg,
+			"ok":            true,
+			"currentActive": req.Name,
+			"configs":       freshProfiles,
+			"message":       fmt.Sprintf("已成功切换并生效配置 [%s]", req.Name),
+			"reloaded":      reloaded,
+			"reloadMsg":     reloadMsg,
 		})
 	})
 
@@ -678,8 +697,8 @@ func main() {
 
 	mux.HandleFunc("DELETE /api/configs/{name}", func(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(r.PathValue("name"))
-		if name == filepath.Base(o.DaeConfig) {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "禁止删除当前主运行配置文件"})
+		if name == filepath.Base(o.DaeConfig) || name == getActiveProfile(o.DaeConfig) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "禁止删除当前生效中的配置文件"})
 			return
 		}
 		targetPath := resolveProfilePath(o.DaeConfig, name)
@@ -693,8 +712,10 @@ func main() {
 	// 4. Config reading, saving, and validation
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		targetFile := o.DaeConfig
+		targetName := getActiveProfile(o.DaeConfig)
 		if qName := r.URL.Query().Get("name"); qName != "" {
 			targetFile = resolveProfilePath(o.DaeConfig, qName)
+			targetName = filepath.Base(qName)
 		}
 
 		b, err := os.ReadFile(targetFile)
@@ -709,8 +730,8 @@ func main() {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"path":     targetFile,
-			"name":     filepath.Base(targetFile),
-			"isActive": filepath.Base(targetFile) == filepath.Base(o.DaeConfig),
+			"name":     targetName,
+			"isActive": targetName == getActiveProfile(o.DaeConfig),
 			"content":  string(b),
 			"modTime":  modTime,
 		})
@@ -806,7 +827,12 @@ func main() {
 		}
 		_ = os.Chmod(targetFile, 0600)
 
-		isActive := filepath.Base(targetFile) == filepath.Base(o.DaeConfig)
+		targetBase := filepath.Base(targetFile)
+		isActive := targetBase == getActiveProfile(o.DaeConfig)
+		if isActive && targetFile != o.DaeConfig {
+			_ = os.WriteFile(o.DaeConfig, []byte(req.Content), 0600)
+		}
+
 		reloaded := false
 		var reloadMsg string
 		if req.ReloadConfig && isActive {
@@ -1222,18 +1248,47 @@ func envOr(k, def string) string {
 	return def
 }
 
+func getActiveProfileFile(activeConfig string) string {
+	cfgDir := filepath.Dir(activeConfig)
+	return filepath.Join(cfgDir, ".active_profile")
+}
+
+func getActiveProfile(activeConfig string) string {
+	recordFile := getActiveProfileFile(activeConfig)
+	if data, err := os.ReadFile(recordFile); err == nil {
+		name := strings.TrimSpace(string(data))
+		if name != "" {
+			p := resolveProfilePath(activeConfig, name)
+			if _, err := os.Stat(p); err == nil {
+				return name
+			}
+		}
+	}
+	return filepath.Base(activeConfig)
+}
+
+func setActiveProfile(activeConfig, name string) error {
+	recordFile := getActiveProfileFile(activeConfig)
+	return os.WriteFile(recordFile, []byte(strings.TrimSpace(name)), 0600)
+}
+
 func resolveProfilePath(activeConfig, name string) string {
 	if abs, err := filepath.Abs(activeConfig); err == nil {
 		activeConfig = abs
 	}
 	name = filepath.Base(name)
-	if name == filepath.Base(activeConfig) {
-		return activeConfig
-	}
 	cfgDir := filepath.Dir(activeConfig)
 	subConfigsDir := filepath.Join(cfgDir, "configs")
 	_ = os.MkdirAll(subConfigsDir, 0700)
-	return filepath.Join(subConfigsDir, name)
+
+	subPath := filepath.Join(subConfigsDir, name)
+	if _, err := os.Stat(subPath); err == nil {
+		return subPath
+	}
+	if name == filepath.Base(activeConfig) {
+		return activeConfig
+	}
+	return subPath
 }
 
 func parseProfileMeta(filePath string) (note string, rulesCount int, nodesCount int) {
@@ -1272,41 +1327,29 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 	if abs, err := filepath.Abs(activeConfig); err == nil {
 		activeConfig = abs
 	}
-	var list []ConfigProfile
-	seen := make(map[string]bool)
-
-	// 1. Current active config file
-	if fi, err := os.Stat(activeConfig); err == nil {
-		name := filepath.Base(activeConfig)
-		note, rCount, nCount := parseProfileMeta(activeConfig)
-		if note == "" {
-			note = "系统当前主力运行配置"
-		}
-		list = append(list, ConfigProfile{
-			Name:       name,
-			Path:       activeConfig,
-			IsActive:   true,
-			Note:       note,
-			RulesCount: rCount,
-			NodesCount: nCount,
-			Size:       fi.Size(),
-			ModTime:    fi.ModTime(),
-		})
-		seen[name] = true
-	}
-
-	// 2. Scan configs/ subdirectory
 	cfgDir := filepath.Dir(activeConfig)
 	subConfigsDir := filepath.Join(cfgDir, "configs")
 	_ = os.MkdirAll(subConfigsDir, 0700)
 
+	// Ensure activeConfig is also copied to configs/ if not present
+	baseActiveName := filepath.Base(activeConfig)
+	subBaseActive := filepath.Join(subConfigsDir, baseActiveName)
+	if _, err := os.Stat(subBaseActive); os.IsNotExist(err) {
+		if content, err := os.ReadFile(activeConfig); err == nil {
+			_ = os.WriteFile(subBaseActive, content, 0600)
+		}
+	}
+
+	activeProfileName := getActiveProfile(activeConfig)
+
+	var list []ConfigProfile
+	seen := make(map[string]bool)
+
+	// 1. Scan configs/ directory
 	entries, err := os.ReadDir(subConfigsDir)
 	if err == nil {
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".dae") {
-				continue
-			}
-			if seen[e.Name()] {
 				continue
 			}
 			fi, err := e.Info()
@@ -1315,13 +1358,18 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 			}
 			fullPath := filepath.Join(subConfigsDir, e.Name())
 			note, rCount, nCount := parseProfileMeta(fullPath)
+			isActive := (e.Name() == activeProfileName)
 			if note == "" {
-				note = "用户自定义配置文件"
+				if isActive {
+					note = "系统当前主力运行配置"
+				} else {
+					note = "用户自定义配置文件"
+				}
 			}
 			list = append(list, ConfigProfile{
 				Name:       e.Name(),
 				Path:       fullPath,
-				IsActive:   false,
+				IsActive:   isActive,
 				Note:       note,
 				RulesCount: rCount,
 				NodesCount: nCount,
@@ -1329,6 +1377,51 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 				ModTime:    fi.ModTime(),
 			})
 			seen[e.Name()] = true
+		}
+	}
+
+	// 2. If activeConfig baseName wasn't in configs/, include it
+	if !seen[baseActiveName] {
+		if fi, err := os.Stat(activeConfig); err == nil {
+			note, rCount, nCount := parseProfileMeta(activeConfig)
+			isActive := (baseActiveName == activeProfileName)
+			if note == "" {
+				note = "系统主运行配置文件"
+			}
+			list = append(list, ConfigProfile{
+				Name:       baseActiveName,
+				Path:       activeConfig,
+				IsActive:   isActive,
+				Note:       note,
+				RulesCount: rCount,
+				NodesCount: nCount,
+				Size:       fi.Size(),
+				ModTime:    fi.ModTime(),
+			})
+			seen[baseActiveName] = true
+		}
+	}
+
+	// If none was marked active, ensure at least one active profile
+	hasActive := false
+	for _, p := range list {
+		if p.IsActive {
+			hasActive = true
+			break
+		}
+	}
+	if !hasActive && len(list) > 0 {
+		for i := range list {
+			if list[i].Name == baseActiveName {
+				list[i].IsActive = true
+				hasActive = true
+				_ = setActiveProfile(activeConfig, list[i].Name)
+				break
+			}
+		}
+		if !hasActive {
+			list[0].IsActive = true
+			_ = setActiveProfile(activeConfig, list[0].Name)
 		}
 	}
 
