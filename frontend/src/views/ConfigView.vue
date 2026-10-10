@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, shallowRef, computed, watch } from 'vue'
+import { ref, onMounted, shallowRef, computed, watch, nextTick } from 'vue'
 import { t } from '../composables/useSettings'
 import {
   Save,
@@ -35,6 +35,7 @@ import {
   BookOpen,
   Lightbulb,
   HelpCircle,
+  Crosshair,
   Wand2,
   Sparkles,
   ExternalLink,
@@ -60,8 +61,8 @@ import {
   type RoutingPreset,
   type SyntaxDocSection
 } from '../utils/routingPresets'
-import { EditorState } from '@codemirror/state'
-import { EditorView, lineNumbers, keymap } from '@codemirror/view'
+import { EditorState, StateField, StateEffect } from '@codemirror/state'
+import { EditorView, lineNumbers, keymap, Decoration, type DecorationSet } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
 
@@ -275,6 +276,152 @@ const profileFileInput = ref<HTMLInputElement | null>(null)
 const importingProfile = ref(false)
 const showSyntaxErrorModal = ref(false)
 const currentErrorProfile = ref<ConfigProfile | null>(null)
+const showDnsSyntaxDoc = ref(false)
+
+// CodeMirror Error Line Decoration
+const setErrorLineEffect = StateEffect.define<number | null>()
+
+const errorLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none
+  },
+  update(decorations, tr) {
+    decorations = decorations.map(tr.changes)
+    for (const e of tr.effects) {
+      if (e.is(setErrorLineEffect)) {
+        if (e.value === null || e.value <= 0 || e.value > tr.state.doc.lines) {
+          decorations = Decoration.none
+        } else {
+          const line = tr.state.doc.line(e.value)
+          decorations = Decoration.set([
+            Decoration.line({
+              attributes: { class: 'cm-error-line' }
+            }).range(line.from)
+          ])
+        }
+      }
+    }
+    return decorations
+  },
+  provide: f => EditorView.decorations.from(f)
+})
+
+function extractErrorLine(msg: string): { line: number; col?: number; message: string } | null {
+  if (!msg) return null
+  const match = msg.match(/(?:line|第)\s*(\d+)(?::(\d+))?/i) ||
+                msg.match(/(?:^|[\s:])(\d+):(\d+)(?:[\s:]|$)/) ||
+                msg.match(/line\s+(\d+)/i)
+  if (match && match[1]) {
+    const line = parseInt(match[1], 10)
+    const col = match[2] ? parseInt(match[2], 10) : undefined
+    if (!isNaN(line) && line > 0) {
+      return { line, col, message: msg }
+    }
+  }
+  return null
+}
+
+const errorLineInfo = computed<{ line: number; col?: number; message: string } | null>(() => {
+  let msg = ''
+  if (!validationStatus.value.valid && validationStatus.value.checked) {
+    msg = validationStatus.value.message || ''
+  } else {
+    const prof = configProfiles.value.find(p => p.name === currentSelectedConfig.value)
+    if (prof && prof.isValid === false && prof.errorMsg) {
+      msg = prof.errorMsg
+    }
+  }
+  if (!msg) return null
+  const parsed = extractErrorLine(msg)
+  return parsed || { line: 1, message: msg }
+})
+
+const erroneousSection = computed<FormSection | null>(() => {
+  if (validationStatus.value.valid && validationStatus.value.checked) return null
+  let msg = ''
+  if (!validationStatus.value.valid && validationStatus.value.checked) {
+    msg = validationStatus.value.message || ''
+  } else {
+    const prof = configProfiles.value.find(p => p.name === currentSelectedConfig.value)
+    if (prof && prof.isValid === false && prof.errorMsg) {
+      msg = prof.errorMsg
+    }
+  }
+  if (!msg) return null
+
+  const errLine = extractErrorLine(msg)
+  if (errLine && configContent.value) {
+    const lines = configContent.value.split('\n')
+    let currentSection: FormSection | null = null
+    let braceDepth = 0
+    for (let i = 0; i < lines.length && i < errLine.line; i++) {
+      const line = lines[i].trim()
+      if (braceDepth === 0) {
+        if (/^global\s*\{/.test(line)) currentSection = 'global'
+        else if (/^subscription\s*\{/.test(line)) currentSection = 'subscriptions'
+        else if (/^node\s*\{/.test(line)) currentSection = 'nodes'
+        else if (/^dns\s*\{/.test(line)) currentSection = 'dns'
+        else if (/^group\s*\{/.test(line)) currentSection = 'groups'
+        else if (/^routing\s*\{/.test(line)) currentSection = 'routing'
+      }
+      for (const ch of line) {
+        if (ch === '{') braceDepth++
+        else if (ch === '}') braceDepth = Math.max(0, braceDepth - 1)
+      }
+    }
+    if (currentSection) return currentSection
+  }
+
+  const lower = msg.toLowerCase()
+  if (lower.includes('global') || lower.includes('tproxy') || lower.includes('dial_mode') || lower.includes('lan_interface')) return 'global'
+  if (lower.includes('subscription')) return 'subscriptions'
+  if (lower.includes('node') || lower.includes('link:')) return 'nodes'
+  if (lower.includes('dns') || lower.includes('upstream') || lower.includes('qname') || lower.includes('qtype')) return 'dns'
+  if (lower.includes('group') || lower.includes('policy')) return 'groups'
+  if (lower.includes('routing') || lower.includes('route') || lower.includes('dip(') || lower.includes('sip(') || lower.includes('dport(')) return 'routing'
+
+  return null
+})
+
+function highlightErrorLineInEditor(lineNum?: number | null) {
+  if (!editorView.value) return
+  const target = lineNum || errorLineInfo.value?.line
+  if (!target || target <= 0) {
+    editorView.value.dispatch({
+      effects: setErrorLineEffect.of(null)
+    })
+    return
+  }
+  const doc = editorView.value.state.doc
+  const validLine = Math.min(target, doc.lines)
+  const line = doc.line(validLine)
+  editorView.value.dispatch({
+    effects: setErrorLineEffect.of(validLine),
+    selection: { anchor: line.from },
+    scrollIntoView: true
+  })
+}
+
+function switchToCodeAndLocate(targetLine?: number) {
+  currentMode.value = 'code'
+  const lineToJump = targetLine || errorLineInfo.value?.line || 1
+  setTimeout(() => {
+    if (!editorView.value) {
+      initEditor(configContent.value)
+    }
+    highlightErrorLineInEditor(lineToJump)
+  }, 60)
+}
+
+function quickInsertDnsRule(condition: string, preferredTarget?: string) {
+  if (!configModel.value.dns) return
+  let target = preferredTarget || configModel.value.dns.fallback || configModel.value.dns.upstreams[0]?.tag || 'alidns'
+  if (!configModel.value.dns.upstreams.some(u => u.tag === target)) {
+    target = configModel.value.dns.upstreams[0]?.tag || 'alidns'
+  }
+  configModel.value.dns.requestRules.push({ condition, target })
+  isDirty.value = true
+}
 
 function triggerProfileImport() {
   profileFileInput.value?.click()
@@ -456,11 +603,13 @@ function initEditor(content: string) {
       history(),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      errorLineField,
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           configContent.value = update.state.doc.toString()
           isDirty.value = true
           validationStatus.value.checked = false
+          editorView.value?.dispatch({ effects: setErrorLineEffect.of(null) })
         }
       }),
       EditorView.theme({
@@ -488,6 +637,12 @@ function initEditor(content: string) {
     state: startState,
     parent: editorContainer.value
   })
+
+  if (errorLineInfo.value?.line) {
+    setTimeout(() => {
+      highlightErrorLineInEditor(errorLineInfo.value?.line)
+    }, 40)
+  }
 }
 
 function setEditorText(text: string) {
@@ -570,11 +725,32 @@ async function loadConfig(profileName?: string) {
   }
 }
 
-function openEditProfile(name: string) {
+function openEditProfile(name: string, targetTab?: FormSection, jumpToCode?: boolean) {
   currentSelectedConfig.value = name
   loadConfig(name)
-  activeSection.value = 'global'
   viewLevel.value = 'detail'
+  if (jumpToCode) {
+    currentMode.value = 'code'
+    setTimeout(() => {
+      if (!editorView.value) {
+        initEditor(configContent.value)
+      }
+      if (errorLineInfo.value?.line) {
+        highlightErrorLineInEditor(errorLineInfo.value.line)
+      }
+    }, 70)
+  } else {
+    currentMode.value = 'form'
+    setTimeout(() => {
+      if (targetTab) {
+        activeSection.value = targetTab
+      } else if (erroneousSection.value) {
+        activeSection.value = erroneousSection.value
+      } else {
+        activeSection.value = 'global'
+      }
+    }, 70)
+  }
 }
 
 function addDnsUpstream(tag?: string, address?: string) {
@@ -922,6 +1098,9 @@ async function switchMode(mode: Mode) {
     currentMode.value = 'code'
     setTimeout(() => {
       initEditor(configContent.value)
+      if (errorLineInfo.value?.line) {
+        highlightErrorLineInEditor(errorLineInfo.value.line)
+      }
     }, 50)
   } else {
     currentMode.value = 'form'
@@ -966,8 +1145,17 @@ async function validateContent(content: string, showAlert = true) {
       valid: data.valid,
       message: data.message || (data.valid ? t('config.val_valid') : t('config.val_invalid'))
     }
-    if (showAlert && !data.valid) {
-      alert(t('config.val_error_alert', { message: data.message }))
+    if (!data.valid) {
+      if (currentMode.value === 'code' && errorLineInfo.value?.line) {
+        highlightErrorLineInEditor(errorLineInfo.value.line)
+      }
+      if (showAlert) {
+        alert(t('config.val_error_alert', { message: data.message }))
+      }
+    } else {
+      if (editorView.value) {
+        editorView.value.dispatch({ effects: setErrorLineEffect.of(null) })
+      }
     }
   } catch (e: any) {
     validationStatus.value = {
@@ -1736,13 +1924,13 @@ onMounted(async () => {
                   :title="t('config.btn_select_all')"
                 />
               </th>
-              <th style="width: 140px; max-width: 160px">{{ t('config.col_profile_name') }}</th>
-              <th style="min-width: 220px">{{ t('config.col_profile_note') }}</th>
-              <th style="width: 110px">{{ t('config.col_profile_rules') }}</th>
-              <th style="width: 110px">{{ t('config.col_profile_nodes') }}</th>
-              <th style="width: 160px">{{ t('config.col_profile_mod') }}</th>
-              <th style="width: 140px; min-width: 120px">{{ t('config.col_profile_status') }}</th>
-              <th style="width: 310px; min-width: 310px; text-align: right">{{ t('config.col_profile_action') }}</th>
+              <th style="width: 140px; min-width: 130px; white-space: nowrap">{{ t('config.col_profile_name') }}</th>
+              <th style="min-width: 180px">{{ t('config.col_profile_note') }}</th>
+              <th style="width: 120px; min-width: 110px; white-space: nowrap">{{ t('config.col_profile_rules') }}</th>
+              <th style="width: 145px; min-width: 135px; white-space: nowrap">{{ t('config.col_profile_nodes') }}</th>
+              <th style="width: 155px; min-width: 140px; white-space: nowrap">{{ t('config.col_profile_mod') }}</th>
+              <th style="width: 125px; min-width: 115px; white-space: nowrap">{{ t('config.col_profile_status') }}</th>
+              <th style="width: 290px; min-width: 290px; text-align: right; white-space: nowrap">{{ t('config.col_profile_action') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -1870,11 +2058,13 @@ onMounted(async () => {
             </button>
             <button
               class="mode-btn"
-              :class="{ active: currentMode === 'code' }"
+              :class="{ active: currentMode === 'code', 'mode-btn-error': errorLineInfo !== null }"
               @click="switchMode('code')"
+              :title="errorLineInfo ? ('代码存在语法错误' + (errorLineInfo.line ? ` (第 ${errorLineInfo.line} 行)` : '')) : t('config.mode.code')"
             >
               <Code :size="14" />
               <span>{{ t('config.mode.code') }}</span>
+              <span v-if="errorLineInfo" class="code-error-badge-dot">●</span>
             </button>
           </div>
 
@@ -1965,72 +2155,96 @@ onMounted(async () => {
             <!-- 1. Global -->
             <button
               class="subnav-item"
-              :class="{ active: activeSection === 'global' }"
+              :class="{ active: activeSection === 'global', 'subnav-has-error': erroneousSection === 'global' }"
               @click="activeSection = 'global'"
+              :title="erroneousSection === 'global' ? (validationStatus.message || '该模块存在语法错误') : ''"
             >
               <Sliders :size="15" />
-              <span>{{ t('config.tab_global') }}</span>
+              <span :class="{ 'text-danger font-bold': erroneousSection === 'global' }">{{ t('config.tab_global') }}</span>
+              <span v-if="erroneousSection === 'global'" class="subnav-error-badge">
+                <AlertTriangle :size="11" /> 错误
+              </span>
             </button>
 
             <!-- 2. Subscriptions -->
             <button
               class="subnav-item"
-              :class="{ active: activeSection === 'subscriptions' }"
+              :class="{ active: activeSection === 'subscriptions', 'subnav-has-error': erroneousSection === 'subscriptions' }"
               @click="activeSection = 'subscriptions'"
+              :title="erroneousSection === 'subscriptions' ? (validationStatus.message || '该模块存在语法错误') : ''"
             >
               <Download :size="15" />
-              <span>{{ t('config.tab_subscriptions') }}</span>
-              <span class="count-pill">{{ configModel.subscriptions.length }}</span>
+              <span :class="{ 'text-danger font-bold': erroneousSection === 'subscriptions' }">{{ t('config.tab_subscriptions') }}</span>
+              <span v-if="erroneousSection === 'subscriptions'" class="subnav-error-badge">
+                <AlertTriangle :size="11" /> 错误
+              </span>
+              <span v-else class="count-pill">{{ configModel.subscriptions.length }}</span>
             </button>
 
             <!-- 3. Nodes -->
             <button
               class="subnav-item"
-              :class="{ active: activeSection === 'nodes' }"
+              :class="{ active: activeSection === 'nodes', 'subnav-has-error': erroneousSection === 'nodes' }"
               @click="activeSection = 'nodes'"
+              :title="erroneousSection === 'nodes' ? (validationStatus.message || '该模块存在语法错误') : ''"
             >
               <Server :size="15" />
-              <span>{{ t('config.tab_nodes') }}</span>
-              <span class="count-pill">{{ configModel.nodes.length }}</span>
+              <span :class="{ 'text-danger font-bold': erroneousSection === 'nodes' }">{{ t('config.tab_nodes') }}</span>
+              <span v-if="erroneousSection === 'nodes'" class="subnav-error-badge">
+                <AlertTriangle :size="11" /> 错误
+              </span>
+              <span v-else class="count-pill">{{ configModel.nodes.length }}</span>
             </button>
 
             <!-- 4. DNS Settings -->
             <button
               class="subnav-item"
-              :class="{ active: activeSection === 'dns' }"
+              :class="{ active: activeSection === 'dns', 'subnav-has-error': erroneousSection === 'dns' }"
               @click="activeSection = 'dns'"
+              :title="erroneousSection === 'dns' ? (validationStatus.message || '该模块存在语法错误') : ''"
             >
               <Globe :size="15" />
-              <span>{{ t('config.tab_dns') }}</span>
-              <span class="count-pill">{{ configModel.dns?.upstreams?.length || 0 }}</span>
+              <span :class="{ 'text-danger font-bold': erroneousSection === 'dns' }">{{ t('config.tab_dns') }}</span>
+              <span v-if="erroneousSection === 'dns'" class="subnav-error-badge">
+                <AlertTriangle :size="11" /> 错误
+              </span>
+              <span v-else class="count-pill">{{ configModel.dns?.upstreams?.length || 0 }}</span>
             </button>
 
             <!-- 5. Groups -->
             <button
               class="subnav-item"
-              :class="{ active: activeSection === 'groups' }"
+              :class="{ active: activeSection === 'groups', 'subnav-has-error': erroneousSection === 'groups' }"
               @click="activeSection = 'groups'"
+              :title="erroneousSection === 'groups' ? (validationStatus.message || '该模块存在语法错误') : ''"
             >
               <Layers :size="15" />
-              <span>{{ t('config.tab_groups') }}</span>
-              <span class="count-pill">{{ configModel.groups.length }}</span>
+              <span :class="{ 'text-danger font-bold': erroneousSection === 'groups' }">{{ t('config.tab_groups') }}</span>
+              <span v-if="erroneousSection === 'groups'" class="subnav-error-badge">
+                <AlertTriangle :size="11" /> 错误
+              </span>
+              <span v-else class="count-pill">{{ configModel.groups.length }}</span>
             </button>
 
             <!-- 6. Routing Rules -->
             <button
               class="subnav-item"
-              :class="{ active: activeSection === 'routing' }"
+              :class="{ active: activeSection === 'routing', 'subnav-has-error': erroneousSection === 'routing' }"
               @click="activeSection = 'routing'"
+              :title="erroneousSection === 'routing' ? (validationStatus.message || '该模块存在语法错误') : ''"
             >
               <GitFork :size="15" />
-              <span>{{ t('config.tab_routing') }}</span>
-              <span class="count-pill">{{ configModel.routingRules.length }}</span>
+              <span :class="{ 'text-danger font-bold': erroneousSection === 'routing' }">{{ t('config.tab_routing') }}</span>
+              <span v-if="erroneousSection === 'routing'" class="subnav-error-badge">
+                <AlertTriangle :size="11" /> 错误
+              </span>
+              <span v-else class="count-pill">{{ configModel.routingRules.length }}</span>
             </button>
 
             <!-- 7. Routing Modes (Linked DNS + Rules Collection) -->
             <button
               class="subnav-item"
-              :class="{ active: activeSection === 'modes' }"
+              :class="{ active: activeSection === 'modes', 'subnav-has-error': erroneousSection === 'routing' || erroneousSection === 'dns' }"
               @click="activeSection = 'modes'"
             >
               <Compass :size="15" />
@@ -2041,71 +2255,264 @@ onMounted(async () => {
 
           <!-- Section 1: Global Parameters (按官方文档第一项) -->
           <div v-if="activeSection === 'global'" class="form-section-body">
+            <!-- Erroneous Module Banner -->
+            <div v-if="erroneousSection === 'global'" class="module-syntax-error-banner mb-4">
+              <div class="banner-icon-col">
+                <AlertTriangle :size="20" class="text-danger flex-shrink-0" />
+              </div>
+              <div class="banner-body">
+                <div class="banner-title text-danger">
+                  <strong>{{ t('config.module_error_title') }}</strong>
+                  <span v-if="errorLineInfo?.line" class="error-line-badge">第 {{ errorLineInfo.line }} 行</span>
+                </div>
+                <div class="banner-msg mono">{{ validationStatus.message || errorLineInfo?.message }}</div>
+              </div>
+              <button class="btn btn-sm btn-outline-danger btn-jump-code" @click="switchToCodeAndLocate(errorLineInfo?.line)">
+                <Code :size="13" />
+                <span>{{ t('config.btn_locate_in_code') }}</span>
+              </button>
+            </div>
+
             <div class="section-title-bar">
               <div>
-                <h3>{{ t('config.section.global') }}</h3>
+                <h3 :class="{ 'text-danger': erroneousSection === 'global' }">
+                  {{ t('config.section.global') }}
+                  <span v-if="erroneousSection === 'global'" class="section-error-pill">
+                    <AlertTriangle :size="13" /> 存在语法错误
+                  </span>
+                </h3>
                 <p>{{ t('config.global_desc') }}</p>
               </div>
             </div>
 
             <div class="form-grid">
+              <!-- 1. tproxy_port -->
               <div class="form-group">
-                <label>{{ t('config.field.global_log_level') }}</label>
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_tproxy_port') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.tproxy_port')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <input v-model="configModel.globals['tproxy_port']" @input="isDirty = true" :placeholder="t('config.field.global_tproxy_port_ph')" />
+                <span class="field-help-text">{{ t('config.help.tproxy_port') }}</span>
+              </div>
+
+              <!-- 2. tproxy_port_protect -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_tproxy_port_protect') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.tproxy_port_protect')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <select v-model="configModel.globals['tproxy_port_protect']" @change="isDirty = true">
+                  <option value="true">true (推荐开启/防环路)</option>
+                  <option value="false">false</option>
+                </select>
+                <span class="field-help-text">{{ t('config.help.tproxy_port_protect') }}</span>
+              </div>
+
+              <!-- 3. lan_interface -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_lan_iface') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.lan_interface')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <input v-model="configModel.globals['lan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_lan_iface_ph')" />
+                <span class="field-help-text">{{ t('config.help.lan_interface') }}</span>
+              </div>
+
+              <!-- 4. wan_interface -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_wan_iface') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.wan_interface')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <input v-model="configModel.globals['wan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_wan_iface_ph')" />
+                <span class="field-help-text">{{ t('config.help.wan_interface') }}</span>
+              </div>
+
+              <!-- 5. auto_config_kernel_parameter -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_auto_config_kernel') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.auto_config_kernel')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <select v-model="configModel.globals['auto_config_kernel_parameter']" @change="isDirty = true">
+                  <option value="true">true (自动配置内核参数/推荐)</option>
+                  <option value="false">false</option>
+                </select>
+                <span class="field-help-text">{{ t('config.help.auto_config_kernel') }}</span>
+              </div>
+
+              <!-- 6. dial_mode -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_dial_mode') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.dial_mode')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <select v-model="configModel.globals['dial_mode']" @change="isDirty = true">
+                  <option value="domain">domain (保留域名优先/推荐)</option>
+                  <option value="ip">ip (直连IP)</option>
+                  <option value="domain+">domain+ (双栈退避)</option>
+                  <option value="domain++">domain++ (严格域名)</option>
+                </select>
+                <span class="field-help-text">{{ t('config.help.dial_mode') }}</span>
+              </div>
+
+              <!-- 7. tcp_check_url -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_tcp_check_url') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.tcp_check_url')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <input v-model="configModel.globals['tcp_check_url']" @input="isDirty = true" :placeholder="t('config.field.global_tcp_check_url_ph')" />
+                <span class="field-help-text">{{ t('config.help.tcp_check_url') }}</span>
+              </div>
+
+              <!-- 8. tcp_check_http_method -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_tcp_check_http_method') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.tcp_check_http_method')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <select v-model="configModel.globals['tcp_check_http_method']" @change="isDirty = true">
+                  <option value="HEAD">HEAD (极速低流量/推荐)</option>
+                  <option value="GET">GET</option>
+                </select>
+                <span class="field-help-text">{{ t('config.help.tcp_check_http_method') }}</span>
+              </div>
+
+              <!-- 9. check_interval -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_check_interval') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.check_interval')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <input v-model="configModel.globals['check_interval']" @input="isDirty = true" placeholder="30s" />
+                <span class="field-help-text">{{ t('config.help.check_interval') }}</span>
+              </div>
+
+              <!-- 10. check_tolerance -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_check_tolerance') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.check_tolerance')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <input v-model="configModel.globals['check_tolerance']" @input="isDirty = true" placeholder="50ms" />
+                <span class="field-help-text">{{ t('config.help.check_tolerance') }}</span>
+              </div>
+
+              <!-- 11. sniffing_timeout -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_sniffing_timeout') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.sniffing_timeout')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <input v-model="configModel.globals['sniffing_timeout']" @input="isDirty = true" placeholder="100ms" />
+                <span class="field-help-text">{{ t('config.help.sniffing_timeout') }}</span>
+              </div>
+
+              <!-- 12. tls_implementation -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_tls_implementation') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.tls_implementation')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <select v-model="configModel.globals['tls_implementation']" @change="isDirty = true">
+                  <option value="tls">tls (标准 Go 协议栈)</option>
+                  <option value="utls">utls (指纹伪装增强)</option>
+                </select>
+                <span class="field-help-text">{{ t('config.help.tls_implementation') }}</span>
+              </div>
+
+              <!-- 13. utls -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_utls') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.utls')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <input v-model="configModel.globals['utls']" @input="isDirty = true" placeholder="chrome" />
+                <span class="field-help-text">{{ t('config.help.utls') }}</span>
+              </div>
+
+              <!-- 14. allow_insecure -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_allow_insecure') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.allow_insecure')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
+                <select v-model="configModel.globals['allow_insecure']" @change="isDirty = true">
+                  <option value="false">false (生产推荐关闭)</option>
+                  <option value="true">true</option>
+                </select>
+                <span class="field-help-text">{{ t('config.help.allow_insecure') }}</span>
+              </div>
+
+              <!-- 15. log_level -->
+              <div class="form-group">
+                <label class="form-label-with-help">
+                  <span>{{ t('config.field.global_log_level') }}</span>
+                  <span class="help-tooltip-trigger" :title="t('config.help.log_level')">
+                    <HelpCircle :size="13" class="help-icon" />
+                  </span>
+                </label>
                 <select v-model="configModel.globals['log_level']" @change="isDirty = true">
                   <option value="trace">trace</option>
                   <option value="debug">debug</option>
-                  <option value="info">info</option>
+                  <option value="info">info (默认)</option>
                   <option value="warn">warn</option>
                   <option value="error">error</option>
                 </select>
-              </div>
-
-              <div class="form-group">
-                <label>dial_mode</label>
-                <select v-model="configModel.globals['dial_mode']" @change="isDirty = true">
-                  <option value="domain">domain</option>
-                  <option value="ip">ip</option>
-                  <option value="domain+">domain+</option>
-                </select>
-              </div>
-
-              <div class="form-group">
-                <label>{{ t('config.field.global_lan_iface') }}</label>
-                <input v-model="configModel.globals['lan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_lan_iface_ph')" />
-              </div>
-
-              <div class="form-group">
-                <label>{{ t('config.field.global_wan_iface') }}</label>
-                <input v-model="configModel.globals['wan_interface']" @input="isDirty = true" :placeholder="t('config.field.global_wan_iface_ph')" />
-              </div>
-
-              <div class="form-group">
-                <label>{{ t('config.field.global_tproxy_port') }}</label>
-                <input v-model="configModel.globals['tproxy_port']" @input="isDirty = true" :placeholder="t('config.field.global_tproxy_port_ph')" />
-              </div>
-
-              <div class="form-group">
-                <label>{{ t('config.field.global_tcp_check_url') }}</label>
-                <input v-model="configModel.globals['tcp_check_url']" @input="isDirty = true" :placeholder="t('config.field.global_tcp_check_url_ph')" />
-              </div>
-
-              <div class="form-group">
-                <label>check_interval</label>
-                <input v-model="configModel.globals['check_interval']" @input="isDirty = true" placeholder="30s" />
-              </div>
-
-              <div class="form-group">
-                <label>allow_insecure</label>
-                <select v-model="configModel.globals['allow_insecure']" @change="isDirty = true">
-                  <option value="false">false</option>
-                  <option value="true">true</option>
-                </select>
+                <span class="field-help-text">{{ t('config.help.log_level') }}</span>
               </div>
             </div>
           </div>
 
           <!-- Section 2: Subscriptions (按官方文档第二项) -->
           <div v-else-if="activeSection === 'subscriptions'" class="form-section-body">
+            <!-- Erroneous Module Banner -->
+            <div v-if="erroneousSection === 'subscriptions'" class="module-syntax-error-banner mb-4">
+              <div class="banner-icon-col">
+                <AlertTriangle :size="20" class="text-danger flex-shrink-0" />
+              </div>
+              <div class="banner-body">
+                <div class="banner-title text-danger">
+                  <strong>{{ t('config.module_error_title') }}</strong>
+                  <span v-if="errorLineInfo?.line" class="error-line-badge">第 {{ errorLineInfo.line }} 行</span>
+                </div>
+                <div class="banner-msg mono">{{ validationStatus.message || errorLineInfo?.message }}</div>
+              </div>
+              <button class="btn btn-sm btn-outline-danger btn-jump-code" @click="switchToCodeAndLocate(errorLineInfo?.line)">
+                <Code :size="13" />
+                <span>{{ t('config.btn_locate_in_code') }}</span>
+              </button>
+            </div>
             <div class="section-title-bar">
               <div>
                 <h3>{{ t('config.section.subscriptions') }}</h3>
@@ -2151,9 +2558,32 @@ onMounted(async () => {
 
           <!-- Section 3: Nodes (按官方文档第三项) -->
           <div v-else-if="activeSection === 'nodes'" class="form-section-body">
+            <!-- Erroneous Module Banner -->
+            <div v-if="erroneousSection === 'nodes'" class="module-syntax-error-banner mb-4">
+              <div class="banner-icon-col">
+                <AlertTriangle :size="20" class="text-danger flex-shrink-0" />
+              </div>
+              <div class="banner-body">
+                <div class="banner-title text-danger">
+                  <strong>{{ t('config.module_error_title') }}</strong>
+                  <span v-if="errorLineInfo?.line" class="error-line-badge">第 {{ errorLineInfo.line }} 行</span>
+                </div>
+                <div class="banner-msg mono">{{ validationStatus.message || errorLineInfo?.message }}</div>
+              </div>
+              <button class="btn btn-sm btn-outline-danger btn-jump-code" @click="switchToCodeAndLocate(errorLineInfo?.line)">
+                <Code :size="13" />
+                <span>{{ t('config.btn_locate_in_code') }}</span>
+              </button>
+            </div>
+
             <div class="section-title-bar">
               <div>
-                <h3>{{ t('config.section.nodes') }}</h3>
+                <h3 :class="{ 'text-danger': erroneousSection === 'nodes' }">
+                  {{ t('config.section.nodes') }}
+                  <span v-if="erroneousSection === 'nodes'" class="section-error-pill">
+                    <AlertTriangle :size="13" /> 存在语法错误
+                  </span>
+                </h3>
                 <p>{{ t('config.nodes_desc') }}</p>
               </div>
               <button class="btn btn-primary" @click="openAddNode">
@@ -2200,9 +2630,32 @@ onMounted(async () => {
 
           <!-- Section 4: DNS Settings (官方文档第四项补全) -->
           <div v-else-if="activeSection === 'dns'" class="form-section-body">
+            <!-- Erroneous Module Banner -->
+            <div v-if="erroneousSection === 'dns'" class="module-syntax-error-banner mb-4">
+              <div class="banner-icon-col">
+                <AlertTriangle :size="20" class="text-danger flex-shrink-0" />
+              </div>
+              <div class="banner-body">
+                <div class="banner-title text-danger">
+                  <strong>{{ t('config.module_error_title') }}</strong>
+                  <span v-if="errorLineInfo?.line" class="error-line-badge">第 {{ errorLineInfo.line }} 行</span>
+                </div>
+                <div class="banner-msg mono">{{ validationStatus.message || errorLineInfo?.message }}</div>
+              </div>
+              <button class="btn btn-sm btn-outline-danger btn-jump-code" @click="switchToCodeAndLocate(errorLineInfo?.line)">
+                <Code :size="13" />
+                <span>{{ t('config.btn_locate_in_code') }}</span>
+              </button>
+            </div>
+
             <div class="section-title-bar">
               <div>
-                <h3>{{ t('dns.title') }}</h3>
+                <h3 :class="{ 'text-danger': erroneousSection === 'dns' }">
+                  {{ t('dns.title') }}
+                  <span v-if="erroneousSection === 'dns'" class="section-error-pill">
+                    <AlertTriangle :size="13" /> 存在语法错误
+                  </span>
+                </h3>
                 <p>{{ t('dns.subtitle') }}</p>
               </div>
               <button class="btn btn-primary" @click="addDnsUpstream()">
@@ -2305,9 +2758,88 @@ onMounted(async () => {
                   </h4>
                   <p class="text-xs text-muted">{{ t('dns.req_routing_desc') }}</p>
                 </div>
-                <button class="btn btn-secondary btn-sm" @click="addDnsRequestRule()">
-                  <Plus :size="13" /> {{ t('dns.btn_add_rule') }}
-                </button>
+                <div class="flex items-center gap-2">
+                  <button class="btn btn-secondary btn-sm" @click="showDnsSyntaxDoc = !showDnsSyntaxDoc">
+                    <BookOpen :size="13" />
+                    <span>{{ showDnsSyntaxDoc ? t('common.collapse') : t('dns.btn_toggle_syntax') }}</span>
+                  </button>
+                  <button class="btn btn-primary btn-sm" @click="addDnsRequestRule()">
+                    <Plus :size="13" /> {{ t('dns.btn_add_rule') }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- DNS Request Routing Syntax Guide Box -->
+              <div v-if="showDnsSyntaxDoc" class="dns-syntax-guide-box mb-4">
+                <div class="guide-header">
+                  <div class="guide-title">
+                    <BookOpen :size="15" class="text-primary mr-1" />
+                    <strong>{{ t('dns.syntax_guide_title') }}</strong>
+                  </div>
+                  <p class="text-xs text-muted mt-1">{{ t('dns.syntax_guide_desc') }}</p>
+                </div>
+
+                <div class="guide-cards-grid mt-3">
+                  <div class="syntax-card">
+                    <div class="syntax-card-header">
+                      <span class="syntax-tag">qname(...)</span>
+                      <span class="syntax-name">目标域名特征匹配</span>
+                    </div>
+                    <p class="syntax-desc">匹配 DNS 待解析域名，支持 GeoSite 规则库、域名后缀、关键字及正则：</p>
+                    <ul class="syntax-example-list">
+                      <li><code>qname(geosite:cn)</code> <span>匹配国内主流网站与服务域名</span></li>
+                      <li><code>qname(geosite:google, geosite:youtube)</code> <span>海外重点服务域名</span></li>
+                      <li><code>qname(suffix: apple.com)</code> <span>匹配以 apple.com 结尾的所有域名及子域</span></li>
+                      <li><code>qname(full: example.com)</code> <span>全域名精确匹配 (不含子域)</span></li>
+                      <li><code>qname(keyword: aliyun)</code> <span>包含特定关键字</span></li>
+                      <li><code>qname(regex: '^api\.')</code> <span>正则表达式匹配</span></li>
+                    </ul>
+                  </div>
+
+                  <div class="syntax-card">
+                    <div class="syntax-card-header">
+                      <span class="syntax-tag">qtype(...) & inbound(...)</span>
+                      <span class="syntax-name">解析类型与来源接口</span>
+                    </div>
+                    <p class="syntax-desc">匹配 DNS 请求查询的记录类型或发起客户端来源：</p>
+                    <ul class="syntax-example-list">
+                      <li><code>qtype(a, aaaa)</code> <span>匹配 IPv4 (A) 或 IPv6 (AAAA) 地址查询</span></li>
+                      <li><code>qtype(https)</code> <span>匹配 HTTPS SVCB 服务绑定解析记录</span></li>
+                      <li><code>qtype(txt)</code> <span>匹配 TXT 文本记录查询</span></li>
+                      <li><code>inbound(lan)</code> <span>仅对局域网入站请求生效</span></li>
+                    </ul>
+                  </div>
+
+                  <div class="syntax-card">
+                    <div class="syntax-card-header">
+                      <span class="syntax-tag">逻辑组合 & 兜底执行</span>
+                      <span class="syntax-name">按序命中与 Fallback</span>
+                    </div>
+                    <p class="syntax-desc">规则判定与执行流程说明：</p>
+                    <ul class="syntax-example-list">
+                      <li><code>qname(geosite:cn) && !qtype(https)</code> <span>支持 && 组合与 ! 取反</span></li>
+                      <li><strong>按序命中：</strong> <span>自上而下匹配，一旦首条规则命中立即交由目标上游解析并终止后续匹配</span></li>
+                      <li><strong>Fallback 机制：</strong> <span>未命中任何自定义规则时，统一由指定的 Fallback 上游接管</span></li>
+                    </ul>
+                  </div>
+                </div>
+
+                <!-- Quick Presets Insertion -->
+                <div class="quick-insert-bar mt-3">
+                  <span class="quick-title text-xs text-muted mr-2">常用模板快速填入：</span>
+                  <button class="quick-chip-btn" @click="quickInsertDnsRule('qname(geosite:cn)')">
+                    + 国内域名直连 (geosite:cn)
+                  </button>
+                  <button class="quick-chip-btn" @click="quickInsertDnsRule('qname(geosite:geolocation-!cn)')">
+                    + 境外域名走海外DNS (geolocation-!cn)
+                  </button>
+                  <button class="quick-chip-btn" @click="quickInsertDnsRule('qname(suffix: apple.com)')">
+                    + 苹果服务优化 (suffix: apple.com)
+                  </button>
+                  <button class="quick-chip-btn" @click="quickInsertDnsRule('qtype(https)')">
+                    + 过滤 SVCB (qtype: https)
+                  </button>
+                </div>
               </div>
 
               <table class="dns-table">
@@ -2349,9 +2881,32 @@ onMounted(async () => {
 
           <!-- Section 5: Groups (按官方文档第五项) -->
           <div v-else-if="activeSection === 'groups'" class="form-section-body">
+            <!-- Erroneous Module Banner -->
+            <div v-if="erroneousSection === 'groups'" class="module-syntax-error-banner mb-4">
+              <div class="banner-icon-col">
+                <AlertTriangle :size="20" class="text-danger flex-shrink-0" />
+              </div>
+              <div class="banner-body">
+                <div class="banner-title text-danger">
+                  <strong>{{ t('config.module_error_title') }}</strong>
+                  <span v-if="errorLineInfo?.line" class="error-line-badge">第 {{ errorLineInfo.line }} 行</span>
+                </div>
+                <div class="banner-msg mono">{{ validationStatus.message || errorLineInfo?.message }}</div>
+              </div>
+              <button class="btn btn-sm btn-outline-danger btn-jump-code" @click="switchToCodeAndLocate(errorLineInfo?.line)">
+                <Code :size="13" />
+                <span>{{ t('config.btn_locate_in_code') }}</span>
+              </button>
+            </div>
+
             <div class="section-title-bar">
               <div>
-                <h3>{{ t('config.section.groups') }}</h3>
+                <h3 :class="{ 'text-danger': erroneousSection === 'groups' }">
+                  {{ t('config.section.groups') }}
+                  <span v-if="erroneousSection === 'groups'" class="section-error-pill">
+                    <AlertTriangle :size="13" /> 存在语法错误
+                  </span>
+                </h3>
                 <p>{{ t('config.groups_desc') }}</p>
               </div>
               <button class="btn btn-primary" @click="openAddGroup">
@@ -2402,10 +2957,33 @@ onMounted(async () => {
 
           <!-- Section 6: Routing (按官方文档第六项) -->
           <div v-else-if="activeSection === 'routing'" class="form-section-body">
+            <!-- Erroneous Module Banner -->
+            <div v-if="erroneousSection === 'routing'" class="module-syntax-error-banner mb-4">
+              <div class="banner-icon-col">
+                <AlertTriangle :size="20" class="text-danger flex-shrink-0" />
+              </div>
+              <div class="banner-body">
+                <div class="banner-title text-danger">
+                  <strong>{{ t('config.module_error_title') }}</strong>
+                  <span v-if="errorLineInfo?.line" class="error-line-badge">第 {{ errorLineInfo.line }} 行</span>
+                </div>
+                <div class="banner-msg mono">{{ validationStatus.message || errorLineInfo?.message }}</div>
+              </div>
+              <button class="btn btn-sm btn-outline-danger btn-jump-code" @click="switchToCodeAndLocate(errorLineInfo?.line)">
+                <Code :size="13" />
+                <span>{{ t('config.btn_locate_in_code') }}</span>
+              </button>
+            </div>
+
             <div class="section-title-bar">
               <div>
                 <div class="title-with-badge">
-                  <h3>{{ t('config.section.routing') }}</h3>
+                  <h3 :class="{ 'text-danger': erroneousSection === 'routing' }">
+                    {{ t('config.section.routing') }}
+                    <span v-if="erroneousSection === 'routing'" class="section-error-pill">
+                      <AlertTriangle :size="13" /> 存在语法错误
+                    </span>
+                  </h3>
                   <span
                     v-if="routingHealthReport.hasErrors"
                     class="health-badge danger"
@@ -2773,6 +3351,18 @@ onMounted(async () => {
 
         <!-- 2. Code Editor Mode -->
         <div v-show="currentMode === 'code'" class="editor-wrapper">
+          <!-- Error banner in code mode -->
+          <div v-if="errorLineInfo && errorLineInfo.line" class="code-editor-error-banner">
+            <div class="banner-body-text">
+              <AlertTriangle :size="16" class="text-danger flex-shrink-0" />
+              <span class="font-bold text-danger">{{ t('config.code_error_line_tip', { line: errorLineInfo.line }) }}：</span>
+              <span class="banner-error-msg mono truncate" :title="errorLineInfo.message">{{ errorLineInfo.message }}</span>
+            </div>
+            <button class="btn btn-xs btn-outline-danger btn-jump" @click="highlightErrorLineInEditor(errorLineInfo.line)">
+              <Crosshair :size="13" />
+              <span>{{ t('config.code_btn_jump_error') }}</span>
+            </button>
+          </div>
           <div ref="editorContainer" class="editor-host"></div>
         </div>
       </div>
@@ -3594,9 +4184,13 @@ onMounted(async () => {
         </div>
         <div class="modal-actions">
           <button class="btn btn-secondary" @click="showSyntaxErrorModal = false">{{ t('common.close') }}</button>
-          <button class="btn btn-primary" @click="showSyntaxErrorModal = false; openEditProfile(currentErrorProfile.name)">
+          <button class="btn btn-secondary" @click="showSyntaxErrorModal = false; openEditProfile(currentErrorProfile.name)">
             <Edit2 :size="14" />
             <span>{{ t('config.action_edit') }}修复</span>
+          </button>
+          <button class="btn btn-primary" @click="showSyntaxErrorModal = false; openEditProfile(currentErrorProfile.name, undefined, true)">
+            <Code :size="14" />
+            <span>源码定位修复</span>
           </button>
         </div>
       </div>
@@ -5724,16 +6318,17 @@ onMounted(async () => {
 }
 
 .profiles-table th {
-  padding: 12px 18px;
+  padding: 12px 14px;
   background: rgba(0, 0, 0, 0.2);
   text-align: left;
   font-weight: 600;
   color: #94a3b8;
   border-bottom: 1px solid var(--border-color, #1e293b);
+  white-space: nowrap;
 }
 
 .profiles-table td {
-  padding: 14px 18px;
+  padding: 14px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   vertical-align: middle;
 }
@@ -5783,6 +6378,7 @@ onMounted(async () => {
   background: var(--bg-input, #1e293b);
   color: #cbd5e1;
   border: 1px solid var(--border-color, #334155);
+  white-space: nowrap;
 }
 
 /* Prominent Active Badge */
@@ -5798,6 +6394,7 @@ onMounted(async () => {
   border: 1px solid rgba(16, 185, 129, 0.35);
   border-radius: 9999px;
   box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+  white-space: nowrap;
 }
 
 .badge-inactive {
@@ -5809,6 +6406,7 @@ onMounted(async () => {
   background: rgba(100, 116, 139, 0.1);
   border: 1px solid rgba(100, 116, 139, 0.2);
   border-radius: 9999px;
+  white-space: nowrap;
 }
 
 /* Invalid / Failed Validation Status Badge */
@@ -5824,6 +6422,8 @@ onMounted(async () => {
   border: 1px solid rgba(239, 68, 68, 0.4);
   border-radius: 9999px;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.15s ease;
   box-shadow: 0 0 8px rgba(239, 68, 68, 0.15);
 }
@@ -5860,6 +6460,314 @@ onMounted(async () => {
   border-radius: 0 6px 6px 0;
   font-size: 13px;
   color: #fecaca;
+}
+
+/* Sub-nav Tab Error Indicators */
+.subnav-item.subnav-has-error {
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  color: #f87171 !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.subnav-error-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  margin-left: 4px;
+}
+
+.section-error-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  padding: 2px 8px;
+  border-radius: 9999px;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+/* Module Syntax Error Banner */
+.module-syntax-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-left: 4px solid #ef4444;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.module-syntax-error-banner .banner-icon-col {
+  flex-shrink: 0;
+}
+
+.module-syntax-error-banner .banner-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.module-syntax-error-banner .banner-title {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.module-syntax-error-banner .error-line-badge {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.module-syntax-error-banner .banner-msg {
+  font-size: 12px;
+  color: #fca5a5;
+  margin-top: 3px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.module-syntax-error-banner .btn-jump-code {
+  flex-shrink: 0;
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.module-syntax-error-banner .btn-jump-code:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* Form Group with Help Tips */
+.form-label-with-help {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 5px;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.help-tooltip-trigger {
+  color: #64748b;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  transition: color 0.15s ease;
+}
+
+.help-tooltip-trigger:hover {
+  color: var(--primary, #0284c7);
+}
+
+.field-help-text {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+/* DNS Request Routing Syntax Guide Box */
+.dns-syntax-guide-box {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.guide-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.syntax-card {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.syntax-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.syntax-tag {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.syntax-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.syntax-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.syntax-example-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.syntax-example-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+}
+
+.syntax-example-list code {
+  color: #7dd3fc;
+  background: rgba(14, 165, 233, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  width: fit-content;
+}
+
+.syntax-example-list span {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.quick-insert-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.quick-chip-btn {
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  color: #38bdf8;
+  border-radius: 9999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quick-chip-btn:hover {
+  background: rgba(14, 165, 233, 0.25);
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+/* Code Mode Toolbar Error Indicators */
+.mode-btn-error {
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  color: #f87171 !important;
+}
+
+.code-error-badge-dot {
+  color: #ef4444;
+  font-size: 9px;
+  margin-left: 3px;
+}
+
+/* Code Editor Error Banner */
+.code-editor-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(239, 68, 68, 0.12);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+  font-size: 12px;
+  gap: 12px;
+}
+
+.code-editor-error-banner .banner-body-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.code-editor-error-banner .banner-error-msg {
+  color: #fca5a5;
+  font-size: 11px;
+  max-width: 600px;
+}
+
+.code-editor-error-banner .btn-jump {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.code-editor-error-banner .btn-jump:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* CodeMirror Error Line Highlighting */
+:deep(.cm-error-line) {
+  background-color: rgba(239, 68, 68, 0.24) !important;
+  border-left: 4px solid #ef4444 !important;
+}
+
+:deep(.cm-error-line::after) {
+  content: ' ⚠ 语法错误定位在此行';
+  color: #fca5a5;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  padding-left: 14px;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .profile-action-cell {
