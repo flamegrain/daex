@@ -251,6 +251,13 @@ const messages: Record<LangType, Record<string, string>> = {
     'config.new_modal_note': '备注说明',
     'config.new_modal_note_ph': '例如: 日常游戏低延迟分流配置',
     'config.new_modal_save': '保存并进入列表',
+    'config.btn_import_profile': '导入配置',
+    'config.btn_download_profile': '下载配置',
+    'config.status_invalid': '无效 (语法错误)',
+    'config.modal_syntax_error_title': '配置语法校验错误详情',
+    'config.cannot_activate_invalid': '配置文件「{name}」存在语法错误（校验未通过），无法生效！请先编辑修复后再尝试应用。',
+    'config.import_success_valid': '配置文件「{name}」导入成功并通过语法有效性校验！',
+    'config.import_warn_invalid': '⚠️ 配置文件「{name}」已导入，但未能通过语法有效性校验！已标注为【无效】状态，请修复语法错误后再应用生效。',
 
     // Official example.dae Module Tabs
     'config.tab_global': '1. 全局参数',
@@ -1135,6 +1142,13 @@ const messages: Record<LangType, Record<string, string>> = {
     'config.new_modal_note': 'Description / Note',
     'config.new_modal_note_ph': 'e.g. Low latency gaming proxy configuration',
     'config.new_modal_save': 'Save & Return to List',
+    'config.btn_import_profile': 'Import Config',
+    'config.btn_download_profile': 'Download Config',
+    'config.status_invalid': 'Invalid (Syntax Error)',
+    'config.modal_syntax_error_title': 'Configuration Syntax Error Details',
+    'config.cannot_activate_invalid': 'Configuration file "{name}" contains syntax errors (validation failed) and cannot be activated! Please fix the errors first.',
+    'config.import_success_valid': 'Configuration file "{name}" imported successfully and passed syntax validation!',
+    'config.import_warn_invalid': '⚠️ Configuration file "{name}" imported, but failed syntax validation! It has been marked as [Invalid]. Please fix the syntax errors before activating.',
 
     // Official example.dae Module Tabs
     'config.tab_global': '1. Global',

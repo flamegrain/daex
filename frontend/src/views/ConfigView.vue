@@ -75,6 +75,8 @@ interface ConfigProfile {
   name: string
   path: string
   isActive: boolean
+  isValid?: boolean
+  errorMsg?: string
   note: string
   rulesCount: number
   nodesCount: number
@@ -269,6 +271,79 @@ const showNewProfileModal = ref(false)
 const newProfileName = ref('')
 const newProfileNote = ref('')
 const activatingConfig = ref(false)
+const profileFileInput = ref<HTMLInputElement | null>(null)
+const importingProfile = ref(false)
+const showSyntaxErrorModal = ref(false)
+const currentErrorProfile = ref<ConfigProfile | null>(null)
+
+function triggerProfileImport() {
+  profileFileInput.value?.click()
+}
+
+async function handleProfileFileImport(e: Event) {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+
+  importingProfile.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const res = await fetch('/api/configs/import', {
+      method: 'POST',
+      body: formData
+    })
+    const data = await res.json()
+    if (res.ok && data.ok) {
+      if (data.configs) {
+        configProfiles.value = data.configs
+      } else {
+        await fetchConfigProfiles()
+      }
+
+      if (data.valid) {
+        alert(t('config.import_success_valid', { name: data.name }))
+      } else {
+        const found = configProfiles.value.find(p => p.name === data.name)
+        if (found) {
+          openErrorModal(found)
+        } else {
+          currentErrorProfile.value = {
+            name: data.name,
+            path: '',
+            isActive: false,
+            isValid: false,
+            errorMsg: data.errorMsg,
+            note: '',
+            rulesCount: 0,
+            nodesCount: 0,
+            size: file.size,
+            modTime: ''
+          }
+          showSyntaxErrorModal.value = true
+        }
+        alert(t('config.import_warn_invalid', { name: data.name }))
+      }
+    } else {
+      alert(data.error || '导入配置文件失败')
+    }
+  } catch (err: any) {
+    alert('导入请求失败: ' + err.message)
+  } finally {
+    importingProfile.value = false
+    if (target) target.value = ''
+  }
+}
+
+function downloadProfile(name: string) {
+  window.open(`/api/configs/${encodeURIComponent(name)}/download`, '_blank')
+}
+
+function openErrorModal(profile: ConfigProfile) {
+  currentErrorProfile.value = profile
+  showSyntaxErrorModal.value = true
+}
 
 const currentProfileNote = computed(() => {
   const p = configProfiles.value.find(item => item.name === currentSelectedConfig.value)
@@ -575,6 +650,12 @@ async function handleSelectProfile(name: string) {
 
 async function activateSelectedProfile(name?: string) {
   const target = name || currentSelectedConfig.value
+  const targetProfile = configProfiles.value.find(p => p.name === target)
+  if (targetProfile && targetProfile.isValid === false) {
+    alert(t('config.cannot_activate_invalid', { name: target, error: targetProfile.errorMsg || '语法校验未通过' }))
+    openErrorModal(targetProfile)
+    return
+  }
   if (!confirm(t('config.confirm_activate', { name: target }))) {
     return
   }
@@ -1278,7 +1359,7 @@ function deleteSub(tag: string) {
 
 // Backups & file ops
 function exportConfig() {
-  window.open('/api/config/export', '_blank')
+  downloadProfile(currentSelectedConfig.value)
 }
 
 function triggerImport() {
@@ -1604,6 +1685,15 @@ onMounted(async () => {
           </button>
           <button
             class="btn btn-secondary"
+            @click="triggerProfileImport"
+            :disabled="importingProfile"
+            :title="t('config.btn_import_profile')"
+          >
+            <Upload :size="15" />
+            <span>{{ importingProfile ? t('config.importing') : t('config.btn_import_profile') }}</span>
+          </button>
+          <button
+            class="btn btn-secondary"
             @click="toggleSelectAllProfiles"
             :title="isAllSelected ? t('config.btn_deselect_all') : t('config.btn_select_all')"
           >
@@ -1624,6 +1714,13 @@ onMounted(async () => {
             <span>{{ t('config.backup_btn') }}</span>
           </button>
         </div>
+        <input
+          ref="profileFileInput"
+          type="file"
+          accept=".dae,.conf,.txt"
+          class="hidden"
+          @change="handleProfileFileImport"
+        />
       </header>
 
       <div class="profiles-table-container">
@@ -1644,8 +1741,8 @@ onMounted(async () => {
               <th style="width: 110px">{{ t('config.col_profile_rules') }}</th>
               <th style="width: 110px">{{ t('config.col_profile_nodes') }}</th>
               <th style="width: 160px">{{ t('config.col_profile_mod') }}</th>
-              <th style="width: 110px">{{ t('config.col_profile_status') }}</th>
-              <th style="width: 270px; min-width: 270px; text-align: right">{{ t('config.col_profile_action') }}</th>
+              <th style="width: 140px; min-width: 120px">{{ t('config.col_profile_status') }}</th>
+              <th style="width: 310px; min-width: 310px; text-align: right">{{ t('config.col_profile_action') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -1687,6 +1784,15 @@ onMounted(async () => {
                   <CheckCircle2 :size="13" />
                   <span>{{ t('config.status_active') }}</span>
                 </span>
+                <span
+                  v-else-if="p.isValid === false"
+                  class="badge-invalid-clickable"
+                  @click.stop="openErrorModal(p)"
+                  :title="p.errorMsg || t('config.status_invalid')"
+                >
+                  <AlertTriangle :size="13" />
+                  <span>{{ t('config.status_invalid') }}</span>
+                </span>
                 <span v-else class="badge-inactive">
                   {{ t('config.status_inactive') }}
                 </span>
@@ -1709,6 +1815,13 @@ onMounted(async () => {
                 >
                   <Check :size="13" />
                   <span>{{ t('config.action_activate') }}</span>
+                </button>
+                <button
+                  class="btn-icon-subtle"
+                  @click="downloadProfile(p.name)"
+                  :title="t('config.btn_download_profile')"
+                >
+                  <Download :size="13" />
                 </button>
                 <button
                   class="btn-icon-subtle"
@@ -3455,6 +3568,35 @@ onMounted(async () => {
           </button>
           <button v-if="createModeStep === 2" class="btn btn-primary" :disabled="savingNewMode" @click="saveCustomMode(true)">
             <Check :size="14" /> {{ t('modes.btn_save_and_apply') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Syntax Error Details Modal -->
+    <div v-if="showSyntaxErrorModal && currentErrorProfile" class="modal-backdrop" @click.self="showSyntaxErrorModal = false">
+      <div class="modal-card modal-md">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <AlertTriangle class="text-danger" :size="18" />
+            <h3>{{ t('config.modal_syntax_error_title') }} - {{ currentErrorProfile.name }}</h3>
+          </div>
+          <button class="close-btn" @click="showSyntaxErrorModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="alert-box-danger mb-3">
+            <strong>{{ t('config.status_invalid') }}</strong>: 该配置文件未能通过 dae 核心引擎有效性校验，无法作为生效配置运行。请先修复语法错误。
+          </div>
+          <label class="form-label font-semibold mb-1">dae validate 语法错误信息:</label>
+          <div class="syntax-error-console mono">
+            <pre>{{ currentErrorProfile.errorMsg || '未能获取详细错误信息' }}</pre>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" @click="showSyntaxErrorModal = false">{{ t('common.close') }}</button>
+          <button class="btn btn-primary" @click="showSyntaxErrorModal = false; openEditProfile(currentErrorProfile.name)">
+            <Edit2 :size="14" />
+            <span>{{ t('config.action_edit') }}修复</span>
           </button>
         </div>
       </div>
@@ -5667,6 +5809,57 @@ onMounted(async () => {
   background: rgba(100, 116, 139, 0.1);
   border: 1px solid rgba(100, 116, 139, 0.2);
   border-radius: 9999px;
+}
+
+/* Invalid / Failed Validation Status Badge */
+.badge-invalid-clickable {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.15);
+}
+
+.badge-invalid-clickable:hover {
+  background: rgba(239, 68, 68, 0.28);
+  border-color: #ef4444;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.syntax-error-console {
+  background: #020617;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  padding: 12px 14px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #fca5a5;
+}
+
+.syntax-error-console pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.alert-box-danger {
+  padding: 10px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid #ef4444;
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  color: #fecaca;
 }
 
 .profile-action-cell {

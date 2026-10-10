@@ -81,6 +81,8 @@ type ConfigProfile struct {
 	Name       string    `json:"name"`
 	Path       string    `json:"path"`
 	IsActive   bool      `json:"isActive"`
+	IsValid    bool      `json:"isValid"`
+	ErrorMsg   string    `json:"errorMsg,omitempty"`
 	Note       string    `json:"note"`
 	RulesCount int       `json:"rulesCount"`
 	NodesCount int       `json:"nodesCount"`
@@ -706,6 +708,7 @@ func main() {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
+		_ = os.Remove(getProfileErrorFile(o.DaeConfig, name))
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
@@ -854,20 +857,38 @@ func main() {
 		})
 	})
 
-	// 4. Export config
+	// 4. Export / Download config
 	mux.HandleFunc("GET /api/config/export", func(w http.ResponseWriter, r *http.Request) {
-		b, err := os.ReadFile(o.DaeConfig)
+		targetFile := o.DaeConfig
+		filename := filepath.Base(o.DaeConfig)
+		if qName := r.URL.Query().Get("name"); qName != "" {
+			targetFile = resolveProfilePath(o.DaeConfig, qName)
+			filename = filepath.Base(qName)
+		}
+		b, err := os.ReadFile(targetFile)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		filename := filepath.Base(o.DaeConfig)
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write(b)
 	})
 
-	// 5. Import config
+	mux.HandleFunc("GET /api/configs/{name}/download", func(w http.ResponseWriter, r *http.Request) {
+		name := filepath.Base(r.PathValue("name"))
+		targetPath := resolveProfilePath(o.DaeConfig, name)
+		b, err := os.ReadFile(targetPath)
+		if err != nil {
+			http.Error(w, "File not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write(b)
+	})
+
+	// 5. Import config (editor buffer)
 	mux.HandleFunc("POST /api/config/import", func(w http.ResponseWriter, r *http.Request) {
 		var content []byte
 		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
@@ -896,6 +917,71 @@ func main() {
 			"valid":   valid,
 			"message": msg,
 			"content": string(content),
+		})
+	})
+
+	// 5.1 Import profile file into configs/
+	mux.HandleFunc("POST /api/configs/import", func(w http.ResponseWriter, r *http.Request) {
+		var filename string
+		var content []byte
+
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "failed to read uploaded file: " + err.Error()})
+				return
+			}
+			defer file.Close()
+			filename = header.Filename
+			content, err = io.ReadAll(file)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "failed to read file content: " + err.Error()})
+				return
+			}
+		} else {
+			var req struct {
+				Name    string `json:"name"`
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json: " + err.Error()})
+				return
+			}
+			filename = req.Name
+			content = []byte(req.Content)
+		}
+
+		filename = filepath.Base(strings.TrimSpace(filename))
+		if filename == "" || filename == "." {
+			filename = fmt.Sprintf("import-%s.dae", time.Now().Format("20060102-150405"))
+		}
+		if !strings.HasSuffix(filename, ".dae") {
+			filename += ".dae"
+		}
+
+		targetPath := resolveProfilePath(o.DaeConfig, filename)
+		if err := os.WriteFile(targetPath, content, 0600); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to save imported file: " + err.Error()})
+			return
+		}
+
+		valid, msg := validateDaeConfig(r.Context(), o.DaeBin, string(content))
+		setProfileValidationStatus(o.DaeConfig, filename, valid, msg)
+
+		freshProfiles, _ := listConfigProfiles(o.DaeConfig)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":       true,
+			"name":     filename,
+			"valid":    valid,
+			"errorMsg": msg,
+			"configs":  freshProfiles,
+			"message": func() string {
+				if valid {
+					return fmt.Sprintf("配置文件 [%s] 导入成功并通过语法校验", filename)
+				}
+				return fmt.Sprintf("配置文件 [%s] 导入完成，但未能通过语法校验", filename)
+			}(),
 		})
 	})
 
@@ -1323,6 +1409,29 @@ func parseProfileMeta(filePath string) (note string, rulesCount int, nodesCount 
 	return note, rulesCount, nodesCount
 }
 
+func getProfileErrorFile(activeConfig, name string) string {
+	cfgDir := filepath.Dir(activeConfig)
+	subConfigsDir := filepath.Join(cfgDir, "configs")
+	return filepath.Join(subConfigsDir, "."+filepath.Base(name)+".err")
+}
+
+func getProfileValidationStatus(activeConfig, name string) (bool, string) {
+	errFile := getProfileErrorFile(activeConfig, name)
+	if data, err := os.ReadFile(errFile); err == nil && len(data) > 0 {
+		return false, string(data)
+	}
+	return true, ""
+}
+
+func setProfileValidationStatus(activeConfig, name string, isValid bool, errorMsg string) {
+	errFile := getProfileErrorFile(activeConfig, name)
+	if isValid {
+		_ = os.Remove(errFile)
+	} else {
+		_ = os.WriteFile(errFile, []byte(strings.TrimSpace(errorMsg)), 0600)
+	}
+}
+
 func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 	if abs, err := filepath.Abs(activeConfig); err == nil {
 		activeConfig = abs
@@ -1359,6 +1468,7 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 			fullPath := filepath.Join(subConfigsDir, e.Name())
 			note, rCount, nCount := parseProfileMeta(fullPath)
 			isActive := (e.Name() == activeProfileName)
+			isValid, errDetail := getProfileValidationStatus(activeConfig, e.Name())
 			if note == "" {
 				if isActive {
 					note = "系统当前主力运行配置"
@@ -1370,6 +1480,8 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 				Name:       e.Name(),
 				Path:       fullPath,
 				IsActive:   isActive,
+				IsValid:    isValid,
+				ErrorMsg:   errDetail,
 				Note:       note,
 				RulesCount: rCount,
 				NodesCount: nCount,
@@ -1385,6 +1497,7 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 		if fi, err := os.Stat(activeConfig); err == nil {
 			note, rCount, nCount := parseProfileMeta(activeConfig)
 			isActive := (baseActiveName == activeProfileName)
+			isValid, errDetail := getProfileValidationStatus(activeConfig, baseActiveName)
 			if note == "" {
 				note = "系统主运行配置文件"
 			}
@@ -1392,6 +1505,8 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 				Name:       baseActiveName,
 				Path:       activeConfig,
 				IsActive:   isActive,
+				IsValid:    isValid,
+				ErrorMsg:   errDetail,
 				Note:       note,
 				RulesCount: rCount,
 				NodesCount: nCount,
