@@ -5837,6 +5837,7 @@ onMounted(async () => {
   margin-bottom: 24px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--border-color, #1e293b);
+  gap: 20px;
 }
 
 .header-icon-wrap {
@@ -5849,11 +5850,14 @@ onMounted(async () => {
   border: 1px solid rgba(14, 165, 233, 0.25);
   border-radius: 10px;
   margin-right: 16px;
+  flex-shrink: 0;
 }
 
 .profiles-header .header-left {
   display: flex;
   align-items: center;
+  flex: 1;
+  min-width: 0;
 }
 
 .profiles-title {
@@ -6662,6 +6666,24 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+}
+
+.header-actions .btn {
+  white-space: nowrap !important;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  height: 38px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.header-actions .btn span {
+  white-space: nowrap !important;
 }
 
 /* Status Badges */
