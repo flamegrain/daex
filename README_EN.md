@@ -93,7 +93,7 @@ Seamless integration with systemd daemon: live metrics (PID, Memory, CPU, Uptime
 Run the following command on your Linux server (root privileges required):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mikelee2022/daex/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/flamegrain/daex/main/install.sh | bash
 ```
 
 ### 2. Custom Parameters Install
@@ -101,13 +101,13 @@ curl -fsSL https://raw.githubusercontent.com/Mikelee2022/daex/main/install.sh | 
 Customize listen port or specify an existing dae configuration path:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mikelee2022/daex/main/install.sh | bash -s -- --port 9091 --config /usr/local/etc/dae/config.dae
+curl -fsSL https://raw.githubusercontent.com/flamegrain/daex/main/install.sh | bash -s -- --port 9091 --config /usr/local/etc/dae/config.dae
 ```
 
 ### 3. Install from Source Clone
 
 ```bash
-git clone https://github.com/Mikelee2022/daex.git /opt/dae-webui
+git clone https://github.com/flamegrain/daex.git /opt/dae-webui
 cd /opt/dae-webui
 sudo ./install.sh install
 ```
