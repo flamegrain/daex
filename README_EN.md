@@ -27,7 +27,7 @@
 ### 1. Real-time Traffic Dashboard & Latency Probing
 Real-time upload and download traffic charts, kernel state, outbound connectivity probes (Aliyun, Google, GitHub, YouTube, OpenAI), and available proxy nodes overview.
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" width="100%" alt="daeX Dashboard" />
+  <img src="docs/screenshots/en/dashboard.png" width="100%" alt="daeX Dashboard" />
 </p>
 
 ---
@@ -35,7 +35,7 @@ Real-time upload and download traffic charts, kernel state, outbound connectivit
 ### 2. 4-Step Quick Setup Wizard
 Designed specifically for home gateway & bypass routing: auto-detection of physical NICs, bulk subscription and node import, preset routing modes, eye-catching 3-color latency badges, and one-click activation.
 <p align="center">
-  <img src="docs/screenshots/quick-setup.png" width="100%" alt="daeX Quick Setup" />
+  <img src="docs/screenshots/en/quick-setup.png" width="100%" alt="daeX Quick Setup" />
 </p>
 
 ---
@@ -43,7 +43,7 @@ Designed specifically for home gateway & bypass routing: auto-detection of physi
 ### 3. Profile Management & Syntax Validation
 Manage multiple `.dae` profiles, switch and activate with one click, perform real-time `dae validate` syntax checking, pinpoint error lines with red highlights, and import/export configurations.
 <p align="center">
-  <img src="docs/screenshots/config.png" width="100%" alt="daeX Configuration Management" />
+  <img src="docs/screenshots/en/config.png" width="100%" alt="daeX Configuration Management" />
 </p>
 
 ---
@@ -51,7 +51,7 @@ Manage multiple `.dae` profiles, switch and activate with one click, perform rea
 ### 4. Visual Routing Rules Engine & Preset Templates
 Strictly adheres to dae's "First-Match-Wins" rule hierarchy. Supports drag-and-drop reordering, shadow rule detection, LAN direct protections, and official preset template libraries.
 <p align="center">
-  <img src="docs/screenshots/routing.png" width="100%" alt="daeX Routing Rules" />
+  <img src="docs/screenshots/en/routing.png" width="100%" alt="daeX Routing Rules" />
 </p>
 
 ---
@@ -59,7 +59,7 @@ Strictly adheres to dae's "First-Match-Wins" rule hierarchy. Supports drag-and-d
 ### 5. Outbound Nodes & Grouping Policies
 Parse and manage VLESS, VMess, Trojan, Shadowsocks, Hysteria2 protocols. Schedule grouping policies (`min_moving_avg`, `min_avg10`, `fallback`, `random`) with automatic subscription updates.
 <p align="center">
-  <img src="docs/screenshots/nodes.png" width="100%" alt="daeX Nodes and Policies" />
+  <img src="docs/screenshots/en/nodes.png" width="100%" alt="daeX Nodes and Policies" />
 </p>
 
 ---
@@ -67,7 +67,7 @@ Parse and manage VLESS, VMess, Trojan, Shadowsocks, Hysteria2 protocols. Schedul
 ### 6. System Service Management & Health Diagnostics
 Seamless integration with systemd daemon: live metrics (PID, Memory, CPU, Uptime), full lifecycle actions (Start, Stop, Restart, Reload), and automated system diagnostic health checks.
 <p align="center">
-  <img src="docs/screenshots/service.png" width="100%" alt="daeX Service Management" />
+  <img src="docs/screenshots/en/service.png" width="100%" alt="daeX Service Management" />
 </p>
 
 ---
@@ -93,7 +93,7 @@ Seamless integration with systemd daemon: live metrics (PID, Memory, CPU, Uptime
 Run the following command on your Linux server (root privileges required):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Mikelee2022/daex/main/install.sh | bash
 ```
 
 ### 2. Custom Parameters Install
@@ -101,13 +101,13 @@ curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.
 Customize listen port or specify an existing dae configuration path:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.sh | bash -s -- --port 9091 --config /usr/local/etc/dae/config.dae
+curl -fsSL https://raw.githubusercontent.com/Mikelee2022/daex/main/install.sh | bash -s -- --port 9091 --config /usr/local/etc/dae/config.dae
 ```
 
 ### 3. Install from Source Clone
 
 ```bash
-git clone https://github.com/Mikelee2022/dae-webui.git /opt/dae-webui
+git clone https://github.com/Mikelee2022/daex.git /opt/dae-webui
 cd /opt/dae-webui
 sudo ./install.sh install
 ```

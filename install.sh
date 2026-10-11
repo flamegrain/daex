@@ -18,7 +18,7 @@ DEFAULT_HOST="0.0.0.0"
 DEFAULT_DAE_BIN="/usr/local/bin/dae"
 DEFAULT_DAE_SERVICE="dae"
 BACKUP_BASE_DIR="/var/log/dae-webui/backups"
-GITHUB_REPO="daeuniverse/dae-webui"
+GITHUB_REPO="Mikelee2022/daex"
 
 # 输出着色
 RED='\033[0;31m'

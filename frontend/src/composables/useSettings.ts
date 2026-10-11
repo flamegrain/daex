@@ -3,8 +3,19 @@ import { ref, watch } from 'vue'
 export type ThemeMode = 'dark' | 'light'
 export type LangType = 'zh-CN' | 'en-US'
 
-const savedTheme = (localStorage.getItem('dae_webui_theme') as ThemeMode) || 'dark'
-const savedLang = (localStorage.getItem('dae_webui_lang') as LangType) || 'zh-CN'
+function getInitialLang(): LangType {
+  if (typeof window !== 'undefined') {
+    const q = new URLSearchParams(window.location.search).get('lang')
+    if (q === 'en' || q === 'en-US') return 'en-US'
+    if (q === 'zh' || q === 'zh-CN') return 'zh-CN'
+    const stored = localStorage.getItem('dae_webui_lang') as LangType
+    if (stored === 'zh-CN' || stored === 'en-US') return stored
+  }
+  return 'zh-CN'
+}
+
+const savedTheme = (typeof localStorage !== 'undefined' ? localStorage.getItem('dae_webui_theme') as ThemeMode : null) || 'dark'
+const savedLang = getInitialLang()
 
 export const theme = ref<ThemeMode>(savedTheme)
 export const lang = ref<LangType>(savedLang)

@@ -94,7 +94,7 @@
 在 Linux 服务器（需 root 权限）上执行以下单行命令，脚本将自动识别硬件架构并配置 systemd 守护进程：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Mikelee2022/daex/main/install.sh | bash
 ```
 
 > **提示**：如果中国大陆地区访问 GitHub 较慢，可通过 Git 镜像或克隆源码执行。
@@ -105,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.
 
 ```bash
 # 自定义监听端口 9091 并指定 dae 配置文件
-curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.sh | bash -s -- --port 9091 --config /usr/local/etc/dae/config.dae
+curl -fsSL https://raw.githubusercontent.com/Mikelee2022/daex/main/install.sh | bash -s -- --port 9091 --config /usr/local/etc/dae/config.dae
 ```
 
 ### 3. 从源码目录就地安装
@@ -113,7 +113,7 @@ curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.
 如果你已将本项目代码克隆至服务器，可直接执行根目录下的自动化脚本：
 
 ```bash
-git clone https://github.com/Mikelee2022/dae-webui.git /opt/dae-webui
+git clone https://github.com/Mikelee2022/daex.git /opt/dae-webui
 cd /opt/dae-webui
 
 # 执行自动化安装与服务注册
