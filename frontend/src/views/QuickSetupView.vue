@@ -133,12 +133,12 @@ async function fetchCurrentGlobals() {
 function reuseSystemNodes() {
   if (systemExistingNodes.value.length === 0) return
   existingNodes.value = [...systemExistingNodes.value]
-  subMessage.value = `已从当前系统配置导入 ${systemExistingNodes.value.length} 个就绪节点`
+  subMessage.value = t('quick.msg_reused_nodes', { count: systemExistingNodes.value.length })
 }
 
 async function handleFetchSub() {
   if (!subUrl.value.trim()) {
-    alert('请输入有效的订阅 URL 地址')
+    alert(t('quick.msg_invalid_sub_url'))
     return
   }
   fetchingSub.value = true
@@ -165,13 +165,13 @@ async function handleFetchSub() {
           added++
         }
       }
-      subMessage.value = `成功从订阅拉取并解析了 ${data.nodes.length} 个节点（新添加 ${added} 个）`
+      subMessage.value = t('quick.msg_sub_fetched', { count: data.nodes.length, added })
       subUrl.value = ''
     } else {
-      alert(data.error || '未能解析到有效节点，请检查订阅链接是否正确')
+      alert(data.error || t('quick.msg_no_sub_nodes'))
     }
   } catch (err: any) {
-    alert('拉取订阅失败: ' + err.message)
+    alert(t('quick.msg_sub_failed') + err.message)
   } finally {
     fetchingSub.value = false
   }
@@ -204,9 +204,9 @@ function handleAddSingleNode() {
   }
   if (added > 0) {
     singleNodeLink.value = ''
-    alert(`成功添加 ${added} 个节点`)
+    alert(t('quick.msg_nodes_added', { count: added }))
   } else {
-    alert('节点链接解析失败，请确保格式正确 (如 vless://..., ss://..., trojan://...)')
+    alert(t('quick.msg_invalid_node_link'))
   }
 }
 
@@ -323,7 +323,7 @@ function openCreateMode() {
 
 async function saveCustomMode() {
   if (!newModeForm.value.name.trim()) {
-    alert('模式名称不能为空')
+    alert(t('quick.msg_mode_name_required'))
     return
   }
   const rawLines = newModeForm.value.rulesText.split('\n')
@@ -340,7 +340,7 @@ async function saveCustomMode() {
     }
   }
   if (rules.length === 0) {
-    alert('请输入至少一条有效的路由规则 (格式: condition -> target)')
+    alert(t('quick.msg_rule_required'))
     return
   }
 
@@ -353,7 +353,7 @@ async function saveCustomMode() {
         id: newModeForm.value.id || undefined,
         name: newModeForm.value.name.trim(),
         description: newModeForm.value.description.trim(),
-        badge: newModeForm.value.badge.trim() || '自定义',
+        badge: newModeForm.value.badge.trim() || t('quick.badge_custom'),
         dnsSettings: newModeForm.value.dnsSettings,
         rules
       })
@@ -363,19 +363,19 @@ async function saveCustomMode() {
       showNewModeModal.value = false
       await fetchModes()
       selectedModeId.value = data.id || newModeForm.value.name.trim()
-      alert('自定义模式已创建并选中')
+      alert(t('quick.msg_mode_created'))
     } else {
-      alert(data.error || '创建自定义模式失败')
+      alert(data.error || t('quick.msg_mode_create_failed'))
     }
   } catch (err: any) {
-    alert(err.message || '请求错误')
+    alert(err.message || 'Error')
   } finally {
     savingNewMode.value = false
   }
 }
 
 async function deleteCustomMode(mode: RoutingModeItem) {
-  if (!confirm(`确定删除自定义模式「${mode.name}」吗？`)) return
+  if (!confirm(t('quick.msg_confirm_delete_mode', { name: mode.name }))) return
   try {
     const res = await fetch(`/api/config/modes/${mode.id}`, { method: 'DELETE' })
     if (res.ok) {
@@ -467,22 +467,99 @@ const applying = ref(false)
 const applySuccess = ref(false)
 const saveProfileName = ref('config.quick.dae')
 
+function getLocalizedMode(mode: RoutingModeItem | undefined) {
+  if (!mode) return { name: '', badge: '', description: '' }
+  if (mode.id === 'bypass_cn') {
+    return {
+      name: t('modes.mode_bypass_cn_name'),
+      badge: t('quick.badge_bypass_cn'),
+      description: t('modes.mode_bypass_cn_desc')
+    }
+  }
+  if (mode.id === 'gfwlist') {
+    return {
+      name: t('modes.mode_gfwlist_name'),
+      badge: t('quick.badge_gfwlist'),
+      description: t('modes.mode_gfwlist_desc')
+    }
+  }
+  if (mode.id === 'only_cn') {
+    return {
+      name: t('modes.mode_only_cn_name'),
+      badge: t('quick.badge_only_cn'),
+      description: t('modes.mode_only_cn_desc')
+    }
+  }
+  if (mode.id === 'global') {
+    return {
+      name: t('modes.mode_global_name'),
+      badge: t('quick.badge_global'),
+      description: t('modes.mode_global_desc')
+    }
+  }
+  return {
+    name: mode.name,
+    badge: mode.badge,
+    description: mode.description
+  }
+}
+
+function getTestItemName(item: FastTestItem) {
+  if (lang.value === 'en-US') {
+    if (item.id === 'aliyun') return 'Domestic Direct (Aliyun)'
+    if (item.id === 'google') return 'Overseas Proxy (Google)'
+    if (item.id === 'github') return 'Dev Ecosystem (GitHub)'
+    if (item.id === 'youtube') return 'Streaming Media (YouTube)'
+    if (item.id === 'baidu') return 'Domestic Search (Baidu)'
+    if (item.id === 'bilibili') return 'Domestic Video (Bilibili)'
+    if (item.id === 'openai') return 'AI Service (OpenAI)'
+    if (item.id === 'lan') return 'LAN Gateway Management'
+  }
+  return item.name
+}
+
+function getTestItemExpected(item: FastTestItem) {
+  if (lang.value === 'en-US') {
+    const exp = (item.expectedOut || '').toLowerCase()
+    if (exp.includes('直连') || exp.includes('direct')) {
+      if (exp.includes('局域网') || exp.includes('内网') || exp.includes('lan')) return 'LAN Direct'
+      return 'Direct'
+    }
+    if (exp.includes('代理') || exp.includes('proxy')) {
+      return 'Proxy'
+    }
+  }
+  return item.expectedOut
+}
+
+function getTestItemMessage(item: FastTestItem) {
+  if (lang.value === 'en-US') {
+    if (item.status === 'pending') return 'Waiting for test'
+    if (item.id === 'aliyun') return 'Domestic backbone fiber direct connection'
+    if (item.id === 'google') return 'Overseas target routed via proxy endpoint'
+    if (item.id === 'github') return 'Code hosting & releases channel connected'
+    if (item.id === 'youtube') return 'Global video CDN nodes reachable'
+    if (item.id === 'lan') return 'LAN private network isolated direct connection'
+  }
+  return item.message
+}
+
 function getSpeedQuality(item: FastTestItem) {
   if (item.status === 'pending') {
-    return { level: 'pending', text: '待测试', badgeClass: 'quality-pending' }
+    return { level: 'pending', text: t('quick.quality_pending'), badgeClass: 'quality-pending' }
   }
   if (item.status === 'error' || item.status === 'timeout' || (item.latency <= 0 && item.status !== 'ok') || item.latency >= 500) {
-    return { level: 'fail', text: '无法连接', badgeClass: 'quality-fail' }
+    return { level: 'fail', text: t('quick.quality_fail'), badgeClass: 'quality-fail' }
   }
   if (item.latency >= 120) {
-    return { level: 'slow', text: `慢速 (${item.latency} ms)`, badgeClass: 'quality-slow' }
+    return { level: 'slow', text: t('quick.quality_slow', { latency: item.latency }), badgeClass: 'quality-slow' }
   }
-  return { level: 'fast', text: `快速 (${item.latency} ms)`, badgeClass: 'quality-fast' }
+  return { level: 'fast', text: t('quick.quality_fast', { latency: item.latency }), badgeClass: 'quality-fast' }
 }
 
 async function applyAndActivate() {
   if (existingNodes.value.length === 0) {
-    alert('出站代理节点列表为空，请在步骤 2 中添加至少一个节点！')
+    alert(t('quick.msg_no_nodes_error'))
     currentStep.value = 2
     return
   }
@@ -498,7 +575,7 @@ async function applyAndActivate() {
     })
     const modeData = await modeRes.json()
     if (!modeRes.ok || !modeData.ok) {
-      throw new Error(modeData.error || '应用分流模式失败')
+      throw new Error(modeData.error || t('quick.msg_apply_mode_failed'))
     }
 
     // 2. Fetch fresh model, sync globals & nodes
@@ -550,7 +627,7 @@ async function applyAndActivate() {
         })
         const saveData = await saveRes.json()
         if (!saveRes.ok || saveData.error) {
-          throw new Error(saveData.error || saveData.details || '保存配置失败')
+          throw new Error(saveData.error || saveData.details || t('quick.msg_save_config_failed'))
         }
 
         // 2b. Activate this profile so it is live in dae and prominent in Config Management
@@ -566,7 +643,7 @@ async function applyAndActivate() {
     await runStep4Diagnostics()
     applySuccess.value = true
   } catch (err: any) {
-    alert('配置生效失败: ' + err.message)
+    alert(t('quick.msg_apply_failed') + err.message)
   } finally {
     applying.value = false
   }
@@ -683,7 +760,7 @@ onMounted(async () => {
       <!-- STEP 1: Network & Global -->
       <div v-if="currentStep === 1" class="step-card">
         <div class="step-head">
-          <div class="step-badge">步骤 1 / 4</div>
+          <div class="step-badge">{{ t('quick.step_badge', { current: 1, total: 4 }) }}</div>
           <h3>{{ t('quick.step1_title') }}</h3>
           <p class="step-desc">{{ t('quick.step1_desc') }}</p>
         </div>
@@ -697,13 +774,13 @@ onMounted(async () => {
           >
             <div class="sc-top">
               <div class="sc-icon"><Network :size="20" /></div>
-              <div class="sc-title">旁路网关 / 软路由模式</div>
-              <span class="badge-rec">强烈推荐</span>
+              <div class="sc-title">{{ t('quick.scenario_gateway_title') }}</div>
+              <span class="badge-rec">{{ t('quick.badge_recommended') }}</span>
             </div>
-            <p class="sc-desc">将本机作为家庭/局域网内其他设备（手机、电脑、电视）的默认网关，dae 自动通过 eBPF 透明劫持并分流全网流量，设备无需安装任何客户端。</p>
+            <p class="sc-desc">{{ t('quick.scenario_gateway_desc') }}</p>
             <div class="sc-tags">
-              <span>LAN: 物理网卡</span>
-              <span>WAN: 自动检测</span>
+              <span>{{ t('quick.tag_lan_physical') }}</span>
+              <span>{{ t('quick.tag_wan_auto') }}</span>
             </div>
           </div>
 
@@ -714,12 +791,12 @@ onMounted(async () => {
           >
             <div class="sc-top">
               <div class="sc-icon"><Sliders :size="20" /></div>
-              <div class="sc-title">本机单机客户端模式</div>
+              <div class="sc-title">{{ t('quick.scenario_single_title') }}</div>
             </div>
-            <p class="sc-desc">仅代理本机内的网络请求与容器容器流量（如 Docker、本地浏览器与终端请求），不劫持局域网其他外接设备。</p>
+            <p class="sc-desc">{{ t('quick.scenario_single_desc') }}</p>
             <div class="sc-tags">
-              <span>LAN: docker0 / 留空</span>
-              <span>WAN: 自动检测</span>
+              <span>{{ t('quick.tag_lan_docker') }}</span>
+              <span>{{ t('quick.tag_wan_auto') }}</span>
             </div>
           </div>
         </div>
@@ -729,13 +806,13 @@ onMounted(async () => {
           <div class="form-row-2">
             <div class="form-group">
               <label class="form-label">
-                <span>LAN 局域网接入网卡 (lan_interface)</span>
+                <span>{{ t('quick.field_lan') }}</span>
                 <span class="tip-pill" :title="t('quick.tip_lan')">?</span>
               </label>
               <div class="input-with-chips">
-                <input v-model="lanInterface" class="form-control" placeholder="如 eth0, enp3s0, docker0" />
+                <input v-model="lanInterface" class="form-control" :placeholder="t('quick.placeholder_lan')" />
                 <div v-if="interfaces.length > 0" class="chip-row">
-                  <span class="chip-label">检测到本机网卡:</span>
+                  <span class="chip-label">{{ t('quick.detected_nics') }}</span>
                   <button
                     v-for="i in interfaces.filter(item => !item.isLoop)"
                     :key="i.name"
@@ -743,20 +820,20 @@ onMounted(async () => {
                     :class="{ active: lanInterface === i.name }"
                     @click="lanInterface = i.name"
                   >
-                    {{ i.name }} <span v-if="i.isDefault" class="chip-def">(默认)</span>
+                    {{ i.name }} <span v-if="i.isDefault" class="chip-def">{{ t('quick.nic_default') }}</span>
                   </button>
                 </div>
               </div>
-              <div class="form-help">监听需要被代理转发的流量入口接口。支持填入多个接口以逗号分隔。</div>
+              <div class="form-help">{{ t('quick.help_lan') }}</div>
             </div>
 
             <div class="form-group">
               <label class="form-label">
-                <span>WAN 外网出口网卡 (wan_interface)</span>
+                <span>{{ t('quick.field_wan') }}</span>
                 <span class="tip-pill" :title="t('quick.tip_wan')">?</span>
               </label>
-              <input v-model="wanInterface" class="form-control" placeholder="推荐 auto" />
-              <div class="form-help">流量出站访问互联网的物理接口。推荐保持 <code>auto</code>，dae 会自动探测默认物理网关。</div>
+              <input v-model="wanInterface" class="form-control" :placeholder="t('quick.placeholder_wan')" />
+              <div class="form-help">{{ t('quick.help_wan') }}</div>
             </div>
           </div>
 
@@ -764,20 +841,20 @@ onMounted(async () => {
           <div class="recommend-params-box mt-3">
             <div class="rec-title">
               <Sparkles :size="15" class="text-warning mr-1" />
-              <span>官方推荐核心参数（已自动优化配置，非专业用户无需更改）</span>
+              <span>{{ t('quick.rec_params_title') }}</span>
             </div>
             <div class="rec-grid">
               <div class="rec-item">
-                <span class="k">域名解析嗅探 (dial_mode)</span>
-                <span class="v"><code>domain</code>（智能嗅探，零 DNS 污染）</span>
+                <span class="k">{{ t('quick.param_dial_mode') }}</span>
+                <span class="v"><code>domain</code>{{ t('quick.param_dial_mode_desc') }}</span>
               </div>
               <div class="rec-item">
-                <span class="k">内核参数自动调优</span>
-                <span class="v"><code>true</code>（自动启用内核转发与 BPF JIT）</span>
+                <span class="k">{{ t('quick.param_kernel') }}</span>
+                <span class="v"><code>true</code>{{ t('quick.param_kernel_desc') }}</span>
               </div>
               <div class="rec-item">
-                <span class="k">日志级别</span>
-                <span class="v"><code>info</code>（标准运行日志）</span>
+                <span class="k">{{ t('quick.param_log_level') }}</span>
+                <span class="v"><code>info</code>{{ t('quick.param_log_level_desc') }}</span>
               </div>
             </div>
           </div>
@@ -786,7 +863,7 @@ onMounted(async () => {
         <div class="step-footer">
           <div></div>
           <button class="btn btn-primary" @click="currentStep = 2">
-            <span>{{ t('quick.btn_next_step') }}：节点与订阅</span>
+            <span>{{ t('quick.btn_next_to_nodes') }}</span>
             <ArrowRight :size="15" />
           </button>
         </div>
@@ -795,7 +872,7 @@ onMounted(async () => {
       <!-- STEP 2: Nodes & Subscriptions -->
       <div v-if="currentStep === 2" class="step-card">
         <div class="step-head">
-          <div class="step-badge">步骤 2 / 4</div>
+          <div class="step-badge">{{ t('quick.step_badge', { current: 2, total: 4 }) }}</div>
           <h3>{{ t('quick.step2_title') }}</h3>
           <p class="step-desc">{{ t('quick.step2_desc') }}</p>
         </div>
@@ -806,14 +883,14 @@ onMounted(async () => {
           <div class="import-card">
             <div class="import-card-head">
               <Link2 :size="18" class="text-primary mr-2" />
-              <strong>方法一：通过机场 / 服务商订阅链接一键导入</strong>
+              <strong>{{ t('quick.method1_title') }}</strong>
             </div>
-            <p class="text-xs text-muted mb-2">支持常见 Clash、V2Ray、通用格式订阅链接，系统自动拉取并提取所有可用节点。</p>
+            <p class="text-xs text-muted mb-2">{{ t('quick.method1_desc') }}</p>
             <div class="import-input-row">
               <input
                 v-model="subUrl"
                 class="form-control full-width-input"
-                placeholder="粘贴订阅链接 URL (如 https://example.com/api/v1/client/subscribe?token=...)"
+                :placeholder="t('quick.sub_placeholder')"
               />
               <button
                 class="btn btn-primary btn-fetch"
@@ -822,7 +899,7 @@ onMounted(async () => {
               >
                 <RefreshCw v-if="fetchingSub" :size="14" class="spin" />
                 <Plus v-else :size="14" />
-                <span>{{ fetchingSub ? '正在拉取...' : '立即拉取节点' }}</span>
+                <span>{{ fetchingSub ? t('quick.fetching_sub') : t('quick.btn_fetch_sub') }}</span>
               </button>
             </div>
             <div v-if="subMessage" class="sub-alert success mt-2">
@@ -835,15 +912,15 @@ onMounted(async () => {
           <div class="import-card">
             <div class="import-card-head">
               <Server :size="18" class="text-info mr-2" />
-              <strong>方法二：粘贴单条或批量节点分享链接</strong>
+              <strong>{{ t('quick.method2_title') }}</strong>
             </div>
-            <p class="text-xs text-muted mb-2">支持 <code>vless</code>, <code>vmess</code>, <code>trojan</code>, <code>ss</code>, <code>hysteria2</code> 等协议分享链接（支持单条或多条以换行分隔）。</p>
+            <p class="text-xs text-muted mb-2">{{ t('quick.method2_desc') }}</p>
             <div class="import-textarea-block">
               <textarea
                 v-model="singleNodeLink"
                 class="form-control mono text-xs full-width-textarea mb-2"
                 rows="3"
-                placeholder="在此粘贴节点分享链接，支持多条以换行分隔&#10;支持 vless://... (如 Reality, WS, gRPC)&#10;支持 ss://... 或 trojan://... 或 hysteria2://..."
+                :placeholder="t('quick.node_placeholder')"
               ></textarea>
               <div class="textarea-btn-row">
                 <button
@@ -852,7 +929,7 @@ onMounted(async () => {
                   @click="handleAddSingleNode"
                 >
                   <Plus :size="14" />
-                  <span>解析并添加到列表</span>
+                  <span>{{ t('quick.btn_parse_add') }}</span>
                 </button>
               </div>
             </div>
@@ -864,29 +941,29 @@ onMounted(async () => {
           <div class="section-subhead">
             <div class="flex-align-center gap-2">
               <Layers :size="16" class="text-primary" />
-              <strong>已就绪节点列表</strong>
-              <span class="count-pill">{{ existingNodes.length }} 个节点</span>
+              <strong>{{ t('quick.ready_nodes_title') }}</strong>
+              <span class="count-pill">{{ t('quick.unit_nodes', { count: existingNodes.length }) }}</span>
             </div>
             <div class="flex-align-center gap-2">
               <button
                 v-if="systemExistingNodes.length > 0 && existingNodes.length === 0"
                 class="btn btn-secondary btn-xs btn-reuse-nodes"
                 @click="reuseSystemNodes"
-                title="一键从宿主机当前主力配置载入已有节点"
+                :title="t('quick.reuse_nodes_tip')"
               >
                 <RotateCcw :size="12" />
-                <span>复用当前系统已有节点 ({{ systemExistingNodes.length }} 个)</span>
+                <span>{{ t('quick.btn_reuse_nodes', { count: systemExistingNodes.length }) }}</span>
               </button>
               <span v-if="existingNodes.length > 0" class="text-xs text-success flex-align-center gap-1">
-                <CheckCircle2 :size="13" /> 节点已就绪，可直接进入下一步
+                <CheckCircle2 :size="13" /> {{ t('quick.nodes_ready_tip') }}
               </span>
             </div>
           </div>
 
           <div v-if="existingNodes.length === 0" class="empty-nodes-box">
             <AlertTriangle :size="24" class="text-warning mb-2" />
-            <div class="font-bold">暂无可用代理节点</div>
-            <p class="text-xs text-muted">请在上方输入您的订阅链接并点击「立即拉取节点」，或粘贴单节点链接后添加。</p>
+            <div class="font-bold">{{ t('quick.empty_nodes_title') }}</div>
+            <p class="text-xs text-muted">{{ t('quick.empty_nodes_desc') }}</p>
           </div>
 
           <div v-else class="ready-nodes-grid">
@@ -896,7 +973,7 @@ onMounted(async () => {
                 <div class="node-name-text truncate" :title="n.name">{{ n.name }}</div>
                 <div class="node-addr-text mono text-muted truncate">{{ n.address }}:{{ n.port }}</div>
               </div>
-              <button class="btn-del-node" @click="removeNode(idx)" title="删除节点">
+              <button class="btn-del-node" @click="removeNode(idx)" :title="t('quick.btn_del_node')">
                 <Trash2 :size="12" />
               </button>
             </div>
@@ -909,7 +986,7 @@ onMounted(async () => {
             <span>{{ t('quick.btn_prev_step') }}</span>
           </button>
           <button class="btn btn-primary" :disabled="existingNodes.length === 0" @click="currentStep = 3">
-            <span>{{ t('quick.btn_next_step') }}：选择分流模式</span>
+            <span>{{ t('quick.btn_next_to_modes') }}</span>
             <ArrowRight :size="15" />
           </button>
         </div>
@@ -918,7 +995,7 @@ onMounted(async () => {
       <!-- STEP 3: Routing Modes -->
       <div v-if="currentStep === 3" class="step-card">
         <div class="step-head">
-          <div class="step-badge">步骤 3 / 4</div>
+          <div class="step-badge">{{ t('quick.step_badge', { current: 3, total: 4 }) }}</div>
           <h3>{{ t('quick.step3_title') }}</h3>
           <p class="step-desc">{{ t('quick.step3_desc') }}</p>
         </div>
@@ -942,8 +1019,8 @@ onMounted(async () => {
               </div>
               <div class="mp-title-box">
                 <div class="mp-title-row">
-                  <h4>{{ mode.name }}</h4>
-                  <span class="mp-badge">{{ mode.badge }}</span>
+                  <h4>{{ getLocalizedMode(mode).name }}</h4>
+                  <span class="mp-badge">{{ getLocalizedMode(mode).badge }}</span>
                 </div>
               </div>
               <div class="mp-radio">
@@ -951,19 +1028,19 @@ onMounted(async () => {
               </div>
             </div>
 
-            <p class="mp-desc">{{ mode.description }}</p>
+            <p class="mp-desc">{{ getLocalizedMode(mode).description }}</p>
 
             <div class="mp-bottom">
-              <span class="mp-rules-count">{{ mode.rules.length }} 条联动规则</span>
+              <span class="mp-rules-count">{{ t('quick.unit_rules', { count: mode.rules.length }) }}</span>
               <button class="btn-text-rules" @click.stop="openViewRules(mode)">
                 <Eye :size="12" />
-                <span>查看规则列表</span>
+                <span>{{ t('quick.btn_view_rules') }}</span>
               </button>
               <button
                 v-if="mode.isCustom"
                 class="btn-del-custom"
                 @click.stop="deleteCustomMode(mode)"
-                title="删除自定义模式"
+                :title="t('quick.del_custom_mode')"
               >
                 <Trash2 :size="12" />
               </button>
@@ -973,10 +1050,10 @@ onMounted(async () => {
 
         <!-- Create Custom Mode Trigger -->
         <div class="custom-mode-trigger-bar mt-3">
-          <span>需要更精细的分流策略？</span>
+          <span>{{ t('quick.custom_mode_prompt') }}</span>
           <button class="btn btn-secondary btn-sm" @click="openCreateMode">
             <Plus :size="13" />
-            <span>新建自定义分流模式</span>
+            <span>{{ t('quick.btn_new_custom_mode') }}</span>
           </button>
         </div>
 
@@ -986,7 +1063,7 @@ onMounted(async () => {
             <span>{{ t('quick.btn_prev_step') }}</span>
           </button>
           <button class="btn btn-primary" @click="currentStep = 4; runStep4Diagnostics()">
-            <span>{{ t('quick.btn_next_step') }}：测试与生效</span>
+            <span>{{ t('quick.btn_next_to_test') }}</span>
             <ArrowRight :size="15" />
           </button>
         </div>
@@ -995,7 +1072,7 @@ onMounted(async () => {
       <!-- STEP 4: Diagnostics & Apply -->
       <div v-if="currentStep === 4" class="step-card">
         <div class="step-head">
-          <div class="step-badge">步骤 4 / 4</div>
+          <div class="step-badge">{{ t('quick.step_badge', { current: 4, total: 4 }) }}</div>
           <h3>{{ t('quick.step4_title') }}</h3>
           <p class="step-desc">{{ t('quick.step4_desc') }}</p>
         </div>
@@ -1003,32 +1080,32 @@ onMounted(async () => {
         <!-- Configuration Summary Review Box -->
         <div class="summary-review-box">
           <div class="sr-item">
-            <span class="sr-label">网络接口</span>
+            <span class="sr-label">{{ t('quick.review_interfaces') }}</span>
             <span class="sr-val">LAN: <b>{{ lanInterface }}</b> | WAN: <b>{{ wanInterface }}</b></span>
           </div>
           <div class="sr-item">
-            <span class="sr-label">代理节点</span>
-            <span class="sr-val"><b>{{ existingNodes.length }}</b> 个出站节点</span>
+            <span class="sr-label">{{ t('quick.review_nodes') }}</span>
+            <span class="sr-val">{{ t('quick.review_nodes_count', { count: existingNodes.length }) }}</span>
           </div>
           <div class="sr-item">
-            <span class="sr-label">选定分流模式</span>
-            <span class="sr-val highlight">{{ selectedMode?.name }} ({{ selectedMode?.badge }})</span>
+            <span class="sr-label">{{ t('quick.review_mode') }}</span>
+            <span class="sr-val highlight">{{ getLocalizedMode(selectedMode).name }} ({{ getLocalizedMode(selectedMode).badge }})</span>
           </div>
           <div class="sr-item">
-            <span class="sr-label">DNS 请求分流</span>
-            <span class="sr-val">国内: <code>alidns</code> | 海外: <code>googledns</code></span>
+            <span class="sr-label">{{ t('quick.review_dns') }}</span>
+            <span class="sr-val">{{ t('quick.review_dns_val', { domestic: 'alidns', overseas: 'googledns' }) }}</span>
           </div>
           <div class="sr-item">
-            <span class="sr-label">保存为配置文件方案</span>
+            <span class="sr-label">{{ t('quick.review_save_profile') }}</span>
             <div class="flex-align-center gap-1">
               <input
                 v-model="saveProfileName"
                 class="form-control form-control-xs font-mono"
                 placeholder="config.quick.dae"
-                title="配置文件将归档在「配置管理」中"
+                :title="t('quick.review_save_profile_title')"
               />
             </div>
-            <span class="text-xs text-muted" style="font-size: 11px;">归档于「配置管理」，方便随时微调</span>
+            <span class="text-xs text-muted" style="font-size: 11px;">{{ t('quick.review_profile_tip') }}</span>
           </div>
         </div>
 
@@ -1037,7 +1114,7 @@ onMounted(async () => {
           <div class="diag-head">
             <div class="flex-align-center gap-2">
               <Zap :size="16" class="text-warning" />
-              <strong>目标连通性模拟测试</strong>
+              <strong>{{ t('quick.diag_test_title') }}</strong>
             </div>
             <button
               class="btn btn-secondary btn-xs"
@@ -1045,16 +1122,16 @@ onMounted(async () => {
               @click="runStep4Diagnostics"
             >
               <RefreshCw :size="12" :class="{ spin: testingMode }" />
-              <span>{{ testingMode ? '正在测试...' : '重新检测' }}</span>
+              <span>{{ testingMode ? t('quick.testing') : t('quick.btn_retest') }}</span>
             </button>
           </div>
 
           <div class="diag-items-grid">
             <div v-for="t in testResults" :key="t.id" class="diag-item-card">
               <div class="diag-item-top">
-                <span class="diag-name">{{ t.name }}</span>
+                <span class="diag-name">{{ getTestItemName(t) }}</span>
                 <span class="diag-badge-out" :class="{ direct: t.expectedOut.includes('直连') || t.expectedOut.includes('direct'), proxy: t.expectedOut.includes('代理') || t.expectedOut.includes('proxy') }">
-                  {{ t.expectedOut }}
+                  {{ getTestItemExpected(t) }}
                 </span>
               </div>
               <div class="diag-item-status mt-3">
@@ -1066,8 +1143,8 @@ onMounted(async () => {
                   <span>{{ getSpeedQuality(t).text }}</span>
                 </span>
               </div>
-              <div class="diag-msg text-xs text-muted mt-2" :title="t.message">
-                {{ t.message }}
+              <div class="diag-msg text-xs text-muted mt-2" :title="getTestItemMessage(t)">
+                {{ getTestItemMessage(t) }}
               </div>
             </div>
           </div>
@@ -1077,17 +1154,17 @@ onMounted(async () => {
         <div v-if="applySuccess" class="success-celebration-banner mt-4">
           <div class="sc-icon-circle"><CheckCircle2 :size="28" /></div>
           <div style="flex: 1;">
-            <h4 class="text-success font-bold text-base">恭喜！dae 透明代理配置已成功应用并生效！</h4>
-            <p class="text-sm text-muted mt-1">配置文件已保存为 <code>{{ saveProfileName || 'config.quick.dae' }}</code> 并成功激活生效，可在「配置管理」中随时查询或微调。</p>
+            <h4 class="text-success font-bold text-base">{{ t('quick.success_title') }}</h4>
+            <p class="text-sm text-muted mt-1">{{ t('quick.success_desc', { name: saveProfileName || 'config.quick.dae' }) }}</p>
           </div>
           <div class="flex-align-center gap-2">
             <button class="btn btn-secondary btn-sm" @click="emit('navigate-tab', 'config')">
               <FileCode :size="14" class="mr-1" />
-              <span>前往「配置管理」微调</span>
+              <span>{{ t('quick.btn_goto_config') }}</span>
             </button>
             <button class="btn btn-success btn-sm" @click="emit('navigate-tab', 'home')">
               <Activity :size="14" class="mr-1" />
-              <span>前往首页</span>
+              <span>{{ t('quick.btn_goto_home') }}</span>
             </button>
           </div>
         </div>
@@ -1106,7 +1183,7 @@ onMounted(async () => {
             >
               <RefreshCw v-if="applying" :size="16" class="spin mr-1" />
               <CheckCircle2 v-else :size="16" class="mr-1" />
-              <span>{{ applying ? '正在写入并重启生效...' : '保存配置并一键应用生效' }}</span>
+              <span>{{ applying ? t('quick.saving_activating') : t('quick.btn_save_activate') }}</span>
             </button>
             <template v-else>
               <button
@@ -1114,14 +1191,14 @@ onMounted(async () => {
                 @click="emit('navigate-tab', 'config')"
               >
                 <FileCode :size="16" class="mr-1" />
-                <span>前往「配置管理」微调</span>
+                <span>{{ t('quick.btn_goto_config') }}</span>
               </button>
               <button
                 class="btn btn-success btn-lg"
                 @click="emit('navigate-tab', 'home')"
               >
                 <Activity :size="16" class="mr-1" />
-                <span>前往首页运行看板</span>
+                <span>{{ t('quick.btn_goto_dashboard') }}</span>
               </button>
             </template>
           </div>
@@ -1135,22 +1212,22 @@ onMounted(async () => {
         <div class="modal-header">
           <div class="modal-title-wrap">
             <Compass :size="18" class="text-primary mr-2" />
-            <h3>{{ viewingMode.name }} - 联动规则详情</h3>
+            <h3>{{ getLocalizedMode(viewingMode).name }} - {{ t('quick.modal_rules_detail') }}</h3>
           </div>
           <button class="btn-icon-subtle" @click="showModeRulesModal = false"><X :size="16" /></button>
         </div>
         <div class="modal-body modal-scroll-body">
-          <p class="text-xs text-muted mb-3">{{ viewingMode.description }}</p>
+          <p class="text-xs text-muted mb-3">{{ getLocalizedMode(viewingMode).description }}</p>
 
           <!-- DNS Rules preview -->
           <div class="rule-group-box mb-3">
             <h5 class="text-xs font-bold text-primary mb-2 flex-align-center gap-1">
-              <Globe :size="14" /> DNS 请求分流规则 (request rules)
+              <Globe :size="14" /> {{ t('quick.modal_dns_rules') }}
             </h5>
             <div class="rules-table-box">
               <table class="simple-rules-table">
                 <thead>
-                  <tr><th>匹配条件</th><th>目标解析上游</th></tr>
+                  <tr><th>{{ t('quick.modal_col_condition') }}</th><th>{{ t('quick.modal_col_upstream') }}</th></tr>
                 </thead>
                 <tbody>
                   <tr v-for="(r, idx) in viewingMode.dnsSettings.requestRules" :key="idx">
@@ -1165,12 +1242,12 @@ onMounted(async () => {
           <!-- Routing Rules preview -->
           <div class="rule-group-box">
             <h5 class="text-xs font-bold text-primary mb-2 flex-align-center gap-1">
-              <Sliders :size="14" /> 网络分流路由规则 (routing rules)
+              <Sliders :size="14" /> {{ t('quick.modal_routing_rules') }}
             </h5>
             <div class="rules-table-box">
               <table class="simple-rules-table">
                 <thead>
-                  <tr><th>匹配条件</th><th>出站策略分组</th></tr>
+                  <tr><th>{{ t('quick.modal_col_condition') }}</th><th>{{ t('quick.modal_col_outbound') }}</th></tr>
                 </thead>
                 <tbody>
                   <tr v-for="(r, idx) in viewingMode.rules" :key="idx">
@@ -1187,13 +1264,13 @@ onMounted(async () => {
           </div>
         </div>
         <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showModeRulesModal = false">关闭</button>
+          <button class="btn btn-secondary" @click="showModeRulesModal = false">{{ t('common.close') }}</button>
           <button
             class="btn btn-primary"
             @click="selectedModeId = viewingMode.id; showModeRulesModal = false"
           >
             <Check :size="14" />
-            <span>选用此分流模式</span>
+            <span>{{ t('quick.btn_use_mode') }}</span>
           </button>
         </div>
       </div>
@@ -1205,35 +1282,35 @@ onMounted(async () => {
         <div class="modal-header">
           <div class="modal-title-wrap">
             <Plus :size="18" class="text-primary mr-2" />
-            <h3 v-if="createModeStep === 1">新建自定义分流模式 - 基本信息</h3>
-            <h3 v-else>新建自定义分流模式 - DNS 与分流规则联动</h3>
+            <h3 v-if="createModeStep === 1">{{ t('quick.modal_new_mode_basic') }}</h3>
+            <h3 v-else>{{ t('quick.modal_new_mode_rules') }}</h3>
           </div>
           <button class="btn-icon-subtle" @click="showNewModeModal = false"><X :size="16" /></button>
         </div>
 
         <div v-if="createModeStep === 1" class="modal-body">
           <div class="form-group">
-            <label class="form-label required">模式名称</label>
-            <input v-model="newModeForm.name" class="form-control" placeholder="如：我的个性化游戏分流" />
+            <label class="form-label required">{{ t('quick.form_mode_name') }}</label>
+            <input v-model="newModeForm.name" class="form-control" :placeholder="t('quick.form_mode_name_ph')" />
           </div>
           <div class="form-group mt-3">
-            <label class="form-label">标识徽章文本</label>
-            <input v-model="newModeForm.badge" class="form-control" placeholder="如：游戏专用 / 特殊加速" />
+            <label class="form-label">{{ t('quick.form_mode_badge') }}</label>
+            <input v-model="newModeForm.badge" class="form-control" :placeholder="t('quick.form_mode_badge_ph')" />
           </div>
           <div class="form-group mt-3">
-            <label class="form-label">说明描述</label>
-            <textarea v-model="newModeForm.description" class="form-control" rows="3" placeholder="简要描述该模式的适用场景"></textarea>
+            <label class="form-label">{{ t('quick.form_mode_desc') }}</label>
+            <textarea v-model="newModeForm.description" class="form-control" rows="3" :placeholder="t('quick.form_mode_desc_ph')"></textarea>
           </div>
         </div>
 
         <div v-else class="modal-body modal-scroll-body">
-          <p class="modal-notice-text">分流模式是 DNS 设置 + 分流规则的联动集合。当切换到此模式时，以下 DNS 设置与分流规则将同时写入配置文件。</p>
+          <p class="modal-notice-text">{{ t('quick.modal_notice') }}</p>
           <div class="mode-config-section mb-4 p-3 bg-subtle rounded border">
             <div class="preview-header mb-2 flex-align-center">
               <Globe :size="15" class="text-info mr-2" />
-              <strong class="text-sm">联动 DNS 解析规则</strong>
+              <strong class="text-sm">{{ t('quick.modal_link_dns') }}</strong>
             </div>
-            <div class="text-xs text-muted mb-1 font-semibold">上游 DNS 服务器:</div>
+            <div class="text-xs text-muted mb-1 font-semibold">{{ t('quick.modal_upstream_dns') }}</div>
             <div v-for="(u, idx) in newModeForm.dnsSettings.upstreams" :key="idx" class="flex-gap mb-1">
               <input v-model="u.tag" class="form-control form-control-xs w-1/3" placeholder="tag" />
               <input v-model="u.address" class="form-control form-control-xs flex-1 mono" placeholder="address" />
@@ -1244,19 +1321,19 @@ onMounted(async () => {
           <div class="mode-config-section p-3 bg-subtle rounded border">
             <div class="preview-header mb-2 flex-align-center">
               <Sliders :size="15" class="text-primary mr-2" />
-              <strong class="text-sm">分流路由规则 (每行一条)</strong>
+              <strong class="text-sm">{{ t('quick.modal_routing_lines') }}</strong>
             </div>
             <textarea v-model="newModeForm.rulesText" class="form-control mono text-xs" rows="8"></textarea>
           </div>
         </div>
 
         <div class="modal-actions">
-          <button v-if="createModeStep === 1" class="btn btn-secondary" @click="showNewModeModal = false">取消</button>
-          <button v-if="createModeStep === 1" class="btn btn-primary" @click="createModeStep = 2">下一步 &rarr;</button>
+          <button v-if="createModeStep === 1" class="btn btn-secondary" @click="showNewModeModal = false">{{ t('common.cancel') }}</button>
+          <button v-if="createModeStep === 1" class="btn btn-primary" @click="createModeStep = 2">{{ t('quick.btn_next_step') }} &rarr;</button>
 
-          <button v-if="createModeStep === 2" class="btn btn-secondary" @click="createModeStep = 1">上一步</button>
+          <button v-if="createModeStep === 2" class="btn btn-secondary" @click="createModeStep = 1">{{ t('quick.btn_prev_step') }}</button>
           <button v-if="createModeStep === 2" class="btn btn-primary" :disabled="savingNewMode" @click="saveCustomMode">
-            <Check :size="14" /> 保存自定义模式
+            <Check :size="14" /> {{ t('quick.btn_save_custom_mode') }}
           </button>
         </div>
       </div>
