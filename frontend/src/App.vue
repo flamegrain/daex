@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import {
   Home,
   FileText,
@@ -9,10 +9,11 @@ import {
   Settings,
   CircleDot,
   RefreshCw,
-  Cpu,
   ArrowUpCircle,
-  GitFork
+  GitFork,
+  Wand2
 } from 'lucide-vue-next'
+import QuickSetupView from './views/QuickSetupView.vue'
 import ConfigView from './views/ConfigView.vue'
 import RoutingView from './views/RoutingView.vue'
 import DashboardView from './views/DashboardView.vue'
@@ -23,9 +24,26 @@ import LogsView from './views/LogsView.vue'
 import ServiceView from './views/ServiceView.vue'
 import { t, theme, applyTheme } from './composables/useSettings'
 
-type Tab = 'home' | 'config' | 'routing' | 'nodes' | 'logs' | 'service' | 'update' | 'settings'
+type Tab = 'home' | 'quick-setup' | 'config' | 'routing' | 'nodes' | 'logs' | 'service' | 'update' | 'settings'
 
-const activeTab = ref<Tab>('home')
+const validTabs: Tab[] = ['home', 'quick-setup', 'config', 'routing', 'nodes', 'logs', 'service', 'update', 'settings']
+const initialHash = (typeof window !== 'undefined' ? window.location.hash.replace(/^#\/?/, '') : '') as Tab
+const activeTab = ref<Tab>(validTabs.includes(initialHash) ? initialHash : 'home')
+
+if (typeof window !== 'undefined') {
+  watch(activeTab, (tab) => {
+    if (window.location.hash.replace(/^#\/?/, '') !== tab) {
+      window.location.hash = `#${tab}`
+    }
+  })
+
+  window.addEventListener('hashchange', () => {
+    const h = window.location.hash.replace(/^#\/?/, '') as Tab
+    if (validTabs.includes(h) && activeTab.value !== h) {
+      activeTab.value = h
+    }
+  })
+}
 const daeStatus = ref<Record<string, any> | null>(null)
 const backendHealth = ref<Record<string, any> | null>(null)
 const loadingStatus = ref(false)
@@ -60,7 +78,7 @@ onMounted(() => {
       <!-- App Brand -->
       <div class="brand">
         <div class="brand-logo">
-          <Cpu class="logo-icon" :size="20" />
+          <img src="/logo.png" alt="daeX" class="brand-logo-img" />
         </div>
         <div class="brand-text">
           <h2>{{ t('brand.title') }}</h2>
@@ -78,6 +96,16 @@ onMounted(() => {
         >
           <Home class="nav-icon" :size="18" />
           <span>{{ t('nav.home') }}</span>
+        </button>
+
+        <button
+          class="nav-item nav-item-quick"
+          :class="{ active: activeTab === 'quick-setup' }"
+          @click="activeTab = 'quick-setup'"
+        >
+          <Wand2 class="nav-icon text-amber" :size="18" />
+          <span>{{ t('nav.quick_setup') }}</span>
+          <span class="badge badge-recommend">{{ t('nav.recommended') }}</span>
         </button>
 
         <div class="nav-section-title">{{ t('nav.section.core') }}</div>
@@ -190,7 +218,8 @@ onMounted(() => {
 
     <!-- Right Workspace Area -->
     <main class="workspace">
-      <DashboardView v-if="activeTab === 'home'" />
+      <DashboardView v-if="activeTab === 'home'" @navigate-tab="(tab: string) => activeTab = tab as Tab" />
+      <QuickSetupView v-else-if="activeTab === 'quick-setup'" @navigate-tab="(tab: string) => activeTab = tab as Tab" />
       <ConfigView v-else-if="activeTab === 'config'" />
       <RoutingView v-else-if="activeTab === 'routing'" />
       <NodesView v-else-if="activeTab === 'nodes'" />
@@ -283,15 +312,24 @@ html, body {
 }
 
 .brand-logo {
-  background: linear-gradient(135deg, #0284c7, #2563eb);
-  color: #fff;
   width: 36px;
   height: 36px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(10, 27, 52, 0.4);
+  background: #0a1b34;
+  flex-shrink: 0;
+}
+
+.brand-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
 }
 
 .brand-text h2 {
@@ -365,6 +403,17 @@ html, body {
   border: 1px solid rgba(2, 132, 199, 0.3);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+.badge-recommend {
+  background: rgba(245, 158, 11, 0.15) !important;
+  color: #f59e0b !important;
+  border: 1px solid rgba(245, 158, 11, 0.35) !important;
+  font-weight: 600;
+}
+
+.text-amber {
+  color: #f59e0b;
 }
 
 .sidebar-footer {

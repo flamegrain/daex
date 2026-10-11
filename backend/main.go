@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -503,6 +504,39 @@ func main() {
 	mux.HandleFunc("GET /api/diagnostics/connectivity", handleGetConnectivity())
 	mux.HandleFunc("POST /api/diagnostics/connectivity", handleTestConnectivity())
 
+	// 2.3.3 System network interfaces for wizard and config
+	mux.HandleFunc("GET /api/system/interfaces", func(w http.ResponseWriter, r *http.Request) {
+		ifaces, err := net.Interfaces()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		type IfaceInfo struct {
+			Name      string   `json:"name"`
+			IPs       []string `json:"ips"`
+			IsUp      bool     `json:"isUp"`
+			IsLoop    bool     `json:"isLoop"`
+			IsDefault bool     `json:"isDefault"`
+		}
+		var list []IfaceInfo
+		for _, iface := range ifaces {
+			info := IfaceInfo{
+				Name:   iface.Name,
+				IsUp:   iface.Flags&net.FlagUp != 0,
+				IsLoop: iface.Flags&net.FlagLoopback != 0,
+			}
+			addrs, _ := iface.Addrs()
+			for _, a := range addrs {
+				info.IPs = append(info.IPs, a.String())
+			}
+			if !info.IsLoop && info.IsUp && (strings.HasPrefix(iface.Name, "eth") || strings.HasPrefix(iface.Name, "en") || strings.HasPrefix(iface.Name, "wl") || strings.HasPrefix(iface.Name, "br")) {
+				info.IsDefault = true
+			}
+			list = append(list, info)
+		}
+		writeJSON(w, http.StatusOK, list)
+	})
+
 	// 2.4 System update checks and actions
 	mux.HandleFunc("GET /api/update/check", func(w http.ResponseWriter, r *http.Request) {
 		res, err := checkSystemUpdate(r.Context(), o.DaeBin)
@@ -831,9 +865,16 @@ func main() {
 		_ = os.Chmod(targetFile, 0600)
 
 		targetBase := filepath.Base(targetFile)
-		isActive := targetBase == getActiveProfile(o.DaeConfig)
+		activeName := getActiveProfile(o.DaeConfig)
+		isActive := (targetBase == activeName || targetFile == o.DaeConfig)
 		if isActive && targetFile != o.DaeConfig {
 			_ = os.WriteFile(o.DaeConfig, []byte(req.Content), 0600)
+		}
+		if targetFile == o.DaeConfig && activeName != "" {
+			subPath := resolveProfilePath(o.DaeConfig, activeName)
+			if subPath != o.DaeConfig {
+				_ = os.WriteFile(subPath, []byte(req.Content), 0600)
+			}
 		}
 
 		reloaded := false

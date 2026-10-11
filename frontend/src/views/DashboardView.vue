@@ -13,10 +13,17 @@ import {
   Zap,
   RefreshCw,
   Gauge,
-  PlayCircle
+  PlayCircle,
+  Wand2,
+  Sparkles,
+  ArrowRight
 } from 'lucide-vue-next'
 import * as echarts from 'echarts'
 import { theme, lang, t } from '../composables/useSettings'
+
+const emit = defineEmits<{
+  (e: 'navigate-tab', tab: string): void
+}>()
 
 interface NodeItem {
   key: string
@@ -623,6 +630,36 @@ onUnmounted(() => {
           </tbody>
         </table>
       </div>
+    </section>
+
+    <!-- Quick Setup Guide Entry Banner (首页下方快速设置入口) -->
+    <section class="quick-setup-banner">
+      <div class="qs-banner-content">
+        <div class="qs-banner-icon">
+          <Wand2 :size="28" class="text-primary" />
+        </div>
+        <div class="qs-banner-text">
+          <div class="qs-banner-title-row">
+            <h3>{{ t('dashboard.quick_setup_title') }}</h3>
+            <span class="badge-rec">{{ t('dashboard.quick_setup_badge') }}</span>
+          </div>
+          <p class="qs-banner-desc">{{ t('dashboard.quick_setup_desc') }}</p>
+          <div class="qs-steps-preview">
+            <span class="qs-step-pill">1. 基础网络检测</span>
+            <span class="qs-step-arrow">&rarr;</span>
+            <span class="qs-step-pill">2. 节点与订阅导入</span>
+            <span class="qs-step-arrow">&rarr;</span>
+            <span class="qs-step-pill">3. 分流模式选择</span>
+            <span class="qs-step-arrow">&rarr;</span>
+            <span class="qs-step-pill">4. 连通性测试生效</span>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-lg btn-start-qs" @click="emit('navigate-tab', 'quick-setup')">
+        <Sparkles :size="16" />
+        <span>{{ t('dashboard.quick_setup_btn') }}</span>
+        <ArrowRight :size="16" />
+      </button>
     </section>
   </div>
 </template>
@@ -1240,5 +1277,114 @@ onUnmounted(() => {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* Quick Setup Banner */
+.quick-setup-banner {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1) 0%, rgba(30, 41, 59, 0.7) 100%);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  border-radius: 14px;
+  padding: 22px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  margin-top: 6px;
+  transition: all 0.2s ease;
+}
+
+.quick-setup-banner:hover {
+  border-color: rgba(14, 165, 233, 0.5);
+  box-shadow: 0 6px 24px rgba(14, 165, 233, 0.15);
+}
+
+.qs-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.qs-banner-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: rgba(14, 165, 233, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+.qs-banner-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.qs-banner-title-row h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-main, #f8fafc);
+}
+
+.badge-rec {
+  background: linear-gradient(135deg, #0284c7, #0ea5e9);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.qs-banner-desc {
+  font-size: 13px;
+  color: var(--text-muted, #94a3b8);
+  margin: 4px 0 10px 0;
+}
+
+.qs-steps-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qs-step-pill {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-main, #e2e8f0);
+}
+
+.qs-step-arrow {
+  color: #0284c7;
+  font-size: 12px;
+}
+
+.btn-start-qs {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
+  transition: all 0.2s ease;
+}
+
+.btn-start-qs:hover {
+  background: linear-gradient(135deg, #0369a1, #075985);
+  transform: translateY(-1px);
 }
 </style>

@@ -16,11 +16,22 @@ export function applyTheme(t: ThemeMode) {
   localStorage.setItem('dae_webui_theme', t)
 }
 
+// Update browser tab document title
+export function updateDocumentTitle() {
+  if (typeof document !== 'undefined') {
+    document.title = lang.value === 'zh-CN' ? 'dae 控制台' : 'daeX Console'
+  }
+}
+
 // Apply lang
 export function setLang(l: LangType) {
   lang.value = l
   localStorage.setItem('dae_webui_lang', l)
+  updateDocumentTitle()
 }
+
+// Initialize title
+updateDocumentTitle()
 
 // Translations dictionary
 const messages: Record<LangType, Record<string, string>> = {
@@ -73,6 +84,8 @@ const messages: Record<LangType, Record<string, string>> = {
     'nav.section.core': '核心功能',
     'nav.section.system': '系统状态',
     'nav.home': '首页',
+    'nav.quick_setup': '快速设置',
+    'nav.recommended': '推荐',
     'nav.config': '配置管理',
     'nav.routing': '分流规则',
     'nav.nodes': '节点与策略',
@@ -128,6 +141,36 @@ const messages: Record<LangType, Record<string, string>> = {
     'dashboard.col_latency': '测速延迟',
     'dashboard.active_pill': '生效中',
     'dashboard.standby_pill': '就绪',
+    'dashboard.quick_setup_badge': '小白入门 / 一键配置',
+    'dashboard.quick_setup_title': '第一次使用 dae？试试「快速设置」引导向导',
+    'dashboard.quick_setup_desc': '专为非专业用户设计，4 步完成本地网卡探测、节点添加、智能分流联动与生效测试，告别复杂配置。',
+    'dashboard.quick_setup_btn': '立即开始设置',
+
+    // Quick Setup Wizard
+    'quick.title': '快速设置向导',
+    'quick.badge': '推荐新手使用',
+    'quick.subtitle': '4 步沉浸式指引，智能检测物理网卡与场景，一步搞定分流与节点配置',
+    'quick.btn_back_home': '返回首页',
+    'quick.step1_label': '网络与接口',
+    'quick.step1_sub': '网卡自动探测',
+    'quick.step1_title': '步骤 1：选择部署场景与网络网卡',
+    'quick.step1_desc': '系统已自动扫描并识别当前主机物理网卡，请根据实际运行环境选择对应场景',
+    'quick.tip_lan': '局域网接入网卡，如主路由/旁路由的 LAN 口物理网卡 (如 eth0)',
+    'quick.tip_wan': '广域网外网网卡，建议填写 auto 自动探测',
+    'quick.btn_next_step': '下一步',
+    'quick.btn_prev_step': '上一步',
+    'quick.step2_label': '出站节点与订阅',
+    'quick.step2_sub': '添加代理服务',
+    'quick.step2_title': '步骤 2：添加您的代理节点或订阅链接',
+    'quick.step2_desc': 'dae 需要至少一个可用的出站代理节点用于转发海外流量。支持机场订阅或单节点链接。',
+    'quick.step3_label': '分流模式选择',
+    'quick.step3_sub': 'DNS与规则联动',
+    'quick.step3_title': '步骤 3：选择智能分流模式 (DNS + 路由联动)',
+    'quick.step3_desc': '在 dae 中，不同分流模式需要联动对应匹配的 DNS 解析设置与出站规则。',
+    'quick.step4_label': '诊断测试与生效',
+    'quick.step4_sub': '一键保存并启动',
+    'quick.step4_title': '步骤 4：连通性诊断与一键保存生效',
+    'quick.step4_desc': '验证当前节点及规则在透明代理环境下的实际连通状况，保存并热重载 dae 核心。',
 
     // Config Management
     'config.title': '配置管理',
@@ -995,12 +1038,14 @@ const messages: Record<LangType, Record<string, string>> = {
     'common.back': 'Back',
 
     // Brand & Navigation
-    'brand.title': 'dae WebUI',
+    'brand.title': 'daeX',
     'brand.sub': 'eBPF Transparent Gateway',
     'nav.section.overview': 'Overview',
     'nav.section.core': 'Management',
     'nav.section.system': 'System',
     'nav.home': 'Dashboard',
+    'nav.quick_setup': 'Quick Setup',
+    'nav.recommended': 'Rec',
     'nav.config': 'Configuration',
     'nav.routing': 'Routing Rules',
     'nav.nodes': 'Nodes & Policies',
@@ -1056,6 +1101,36 @@ const messages: Record<LangType, Record<string, string>> = {
     'dashboard.col_latency': 'Latency',
     'dashboard.active_pill': 'Active',
     'dashboard.standby_pill': 'Ready',
+    'dashboard.quick_setup_badge': 'Beginner Friendly / Quick Setup',
+    'dashboard.quick_setup_title': 'First time using dae? Try the Quick Setup Wizard',
+    'dashboard.quick_setup_desc': 'Designed for everyday users. Complete network interface detection, node addition, routing mode linkage, and connectivity test in 4 easy steps.',
+    'dashboard.quick_setup_btn': 'Start Setup Now',
+
+    // Quick Setup Wizard
+    'quick.title': 'Quick Setup Wizard',
+    'quick.badge': 'Recommended for Beginners',
+    'quick.subtitle': '4-step guided setup with smart interface detection, scenario presets, and verified routing',
+    'quick.btn_back_home': 'Back to Dashboard',
+    'quick.step1_label': 'Network & Interfaces',
+    'quick.step1_sub': 'Auto Detection',
+    'quick.step1_title': 'Step 1: Choose Scenario & Network Interfaces',
+    'quick.step1_desc': 'The system scanned your host interfaces. Choose your scenario based on your network environment.',
+    'quick.tip_lan': 'LAN ingress interface, such as eth0 on your router/gateway',
+    'quick.tip_wan': 'WAN egress interface. "auto" is recommended',
+    'quick.btn_next_step': 'Next Step',
+    'quick.btn_prev_step': 'Previous Step',
+    'quick.step2_label': 'Nodes & Subscriptions',
+    'quick.step2_sub': 'Proxy Endpoints',
+    'quick.step2_title': 'Step 2: Add Outbound Nodes or Subscription URLs',
+    'quick.step2_desc': 'dae requires at least one working proxy node. Supports subscription URLs and single links.',
+    'quick.step3_label': 'Routing Mode Selection',
+    'quick.step3_sub': 'DNS & Rule Linkage',
+    'quick.step3_title': 'Step 3: Select Routing Mode (DNS + Rules)',
+    'quick.step3_desc': 'Different routing modes require synchronized DNS upstreams and routing rules.',
+    'quick.step4_label': 'Diagnostics & Activation',
+    'quick.step4_sub': 'Save & Reload',
+    'quick.step4_title': 'Step 4: Connectivity Test & One-Click Activation',
+    'quick.step4_desc': 'Verify live connectivity under transparent proxy, save, and reload dae service.',
 
     // Config Management
     'config.title': 'Configuration',
@@ -1795,7 +1870,7 @@ const messages: Record<LangType, Record<string, string>> = {
     'logs.confirm_delete_backup': 'Confirm deleting log snapshot [{name}]?',
     'logs.delete_backup_failed': 'Failed to delete backup: {error}',
     'settings.about.comp_label': 'Component',
-    'settings.about.comp_value': 'dae Visualized Console & WebUI',
+    'settings.about.comp_value': 'daeX Visualized Console & WebUI',
     'settings.about.kernel_label': 'Kernel Technology',
     'settings.about.kernel_value': 'Linux eBPF Transparent Routing Core',
     'settings.about.arch_label': 'Architecture',

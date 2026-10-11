@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, shallowRef, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, shallowRef, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { t } from '../composables/useSettings'
 import {
   Save,
@@ -141,81 +141,29 @@ interface DaeConfigModel {
 }
 
 type Mode = 'form' | 'code'
-type FormSection = 'global' | 'subscriptions' | 'nodes' | 'dns' | 'groups' | 'routing' | 'modes'
-
-interface RoutingModeRule {
-  condition: string
-  target: string
-}
-
-interface FastTestItem {
-  id: string
-  name: string
-  url: string
-  category: string
-  expectedOut: string
-  matchedRule: string
-  status: string
-  latency: number
-  httpCode: number
-  message: string
-}
-
-interface RoutingModeItem {
-  id: string
-  name: string
-  description: string
-  badge: string
-  isCustom: boolean
-  dnsSettings?: DnsConfig
-  rules: RoutingModeRule[]
-  testResults: FastTestItem[]
-}
+type FormSection = 'global' | 'subscriptions' | 'nodes' | 'dns' | 'groups' | 'routing'
 
 const viewLevel = ref<'list' | 'detail'>('list')
 const currentMode = ref<Mode>('form')
 const activeSection = ref<FormSection>('global')
 
-const modesList = ref<RoutingModeItem[]>([])
-const activeModeId = ref('bypass_cn')
-const loadingModes = ref(false)
-const applyingModeId = ref<string | null>(null)
-const testingModeId = ref<string | null>(null)
-
-const showModeRulesModal = ref(false)
-const viewingMode = ref<RoutingModeItem | null>(null)
-
-const showNewModeModal = ref(false)
-const createModeStep = ref<1 | 2>(1)
-const newModeForm = ref({
-  id: '',
-  name: '',
-  description: '',
-  badge: '自定义',
-  dnsSettings: {
-    ipVersionPrefer: 4,
-    fixedDomainTTL: 0,
-    optimisticCache: false,
-    upstreams: [
-      { tag: 'alidns', address: 'udp://223.5.5.5:53' },
-      { tag: 'googledns', address: 'tcp+udp://dns.google:53' }
-    ],
-    requestRules: [
-      { condition: 'qname(geosite:cn)', target: 'alidns' }
-    ],
-    fallback: 'googledns'
-  },
-  rulesText: 'pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct\ndip(224.0.0.0/3, "ff00::/8") -> direct\ndip(geoip:private) -> direct\ndomain(geosite:category-ads-all) -> block\ndomain(geosite:cn) -> direct\ndip(geoip:cn) -> direct\nfallback: proxy'
-})
-const savingNewMode = ref(false)
-
-function getActiveModeBadge() {
-  const m = modesList.value.find(item => item.id === activeModeId.value)
-  return m ? (m.badge || m.name) : '绕过大陆'
-}
-
 const editorContainer = ref<HTMLDivElement | null>(null)
 const editorView = shallowRef<EditorView | null>(null)
+
+function backToProfilesList() {
+  if (editorView.value) {
+    editorView.value.destroy()
+    editorView.value = null
+  }
+  viewLevel.value = 'list'
+}
+
+onBeforeUnmount(() => {
+  if (editorView.value) {
+    editorView.value.destroy()
+    editorView.value = null
+  }
+})
 
 const configContent = ref('')
 const configPath = ref('')
@@ -306,22 +254,90 @@ const errorLineField = StateField.define<DecorationSet>({
   provide: f => EditorView.decorations.from(f)
 })
 
-function extractErrorLine(msg: string): { line: number; col?: number; message: string } | null {
+function findErrorLineInContent(content: string, msg: string): { line: number; col?: number; message: string } | null {
   if (!msg) return null
-  const match = msg.match(/(?:line|第)\s*(\d+)(?::(\d+))?/i) ||
-                msg.match(/(?:^|[\s:])(\d+):(\d+)(?:[\s:]|$)/) ||
-                msg.match(/line\s+(\d+)/i)
-  if (match && match[1]) {
-    const line = parseInt(match[1], 10)
-    const col = match[2] ? parseInt(match[2], 10) : undefined
+  const lines = (content || '').split('\n')
+
+  // 1. ANTLR syntax error: "line X:Y" or "line X"
+  const lineMatch = msg.match(/(?:line|第)\s*(\d+)(?::(\d+))?/i)
+  if (lineMatch && lineMatch[1]) {
+    let line = parseInt(lineMatch[1], 10)
+    const col = lineMatch[2] ? parseInt(lineMatch[2], 10) : undefined
     if (!isNaN(line) && line > 0) {
+      if (lines.length > 0) {
+        if (line > lines.length) line = lines.length
+        const curLineText = (lines[line - 1] || '').trim()
+        // If ANTLR points to closing brace '}' and previous line was incomplete:
+        if (curLineText === '}' || curLineText.startsWith('}')) {
+          for (let i = line - 2; i >= 0; i--) {
+            const prev = (lines[i] || '').trim()
+            if (prev && !prev.startsWith('#')) {
+              if (prev.endsWith('->') || prev.endsWith('&&') || prev.endsWith(',') || prev.endsWith('(') || prev.endsWith(':') || msg.includes("mismatched input '}'") || msg.includes('mismatched input \'}\'')) {
+                line = i + 1
+              }
+              break
+            }
+          }
+        }
+      }
       return { line, col, message: msg }
     }
   }
-  return null
+
+  // 2. unexpected key: <key>
+  const keyMatch = msg.match(/unexpected key:\s*([a-zA-Z0-9_\-]+)/i)
+  if (keyMatch && keyMatch[1] && lines.length > 0) {
+    const key = keyMatch[1]
+    for (let i = 0; i < lines.length; i++) {
+      const lineStr = lines[i]
+      if (new RegExp('^\\s*' + key + '\\s*:').test(lineStr) || lineStr.includes(key)) {
+        return { line: i + 1, message: msg }
+      }
+    }
+  }
+
+  // 3. Quoted tokens: e.g. outbound (group) "xxx" not found, or failed to parse "xxx"
+  if (lines.length > 0) {
+    const quotedMatches: string[] = []
+    const regex = /["']([^"'\s]{2,})["']/g
+    let qm: RegExpExecArray | null
+    while ((qm = regex.exec(msg)) !== null) {
+      const token = qm[1]
+      if (!['global', 'subscription', 'node', 'dns', 'group', 'routing', 'true', 'false', 'info', 'warn', 'error', 'debug'].includes(token.toLowerCase())) {
+        quotedMatches.push(token)
+      }
+    }
+    for (const token of quotedMatches) {
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(token)) {
+          return { line: i + 1, message: msg }
+        }
+      }
+    }
+  }
+
+  // 4. Section fallback (e.g. failed to parse "global")
+  if (lines.length > 0) {
+    const secMatch = msg.match(/(?:failed to parse|section)\s*["']?([a-zA-Z]+)["']?/i)
+    if (secMatch && secMatch[1]) {
+      const sec = secMatch[1].toLowerCase()
+      for (let i = 0; i < lines.length; i++) {
+        if (new RegExp('^\\s*' + sec + '\\s*\\{').test(lines[i])) {
+          return { line: i + 1, message: msg }
+        }
+      }
+    }
+  }
+
+  return { line: 1, message: msg }
 }
 
+const activeSyntaxError = ref<{ line: number; col?: number; message: string } | null>(null)
+
 const errorLineInfo = computed<{ line: number; col?: number; message: string } | null>(() => {
+  if (activeSyntaxError.value) {
+    return activeSyntaxError.value
+  }
   let msg = ''
   if (!validationStatus.value.valid && validationStatus.value.checked) {
     msg = validationStatus.value.message || ''
@@ -332,24 +348,25 @@ const errorLineInfo = computed<{ line: number; col?: number; message: string } |
     }
   }
   if (!msg) return null
-  const parsed = extractErrorLine(msg)
-  return parsed || { line: 1, message: msg }
+  return findErrorLineInContent(configContent.value, msg)
 })
 
 const erroneousSection = computed<FormSection | null>(() => {
-  if (validationStatus.value.valid && validationStatus.value.checked) return null
-  let msg = ''
-  if (!validationStatus.value.valid && validationStatus.value.checked) {
-    msg = validationStatus.value.message || ''
-  } else {
-    const prof = configProfiles.value.find(p => p.name === currentSelectedConfig.value)
-    if (prof && prof.isValid === false && prof.errorMsg) {
-      msg = prof.errorMsg
+  if (validationStatus.value.valid && validationStatus.value.checked && !activeSyntaxError.value) return null
+  let msg = activeSyntaxError.value?.message || ''
+  if (!msg) {
+    if (!validationStatus.value.valid && validationStatus.value.checked) {
+      msg = validationStatus.value.message || ''
+    } else {
+      const prof = configProfiles.value.find(p => p.name === currentSelectedConfig.value)
+      if (prof && prof.isValid === false && prof.errorMsg) {
+        msg = prof.errorMsg
+      }
     }
   }
   if (!msg) return null
 
-  const errLine = extractErrorLine(msg)
+  const errLine = errorLineInfo.value || findErrorLineInContent(configContent.value, msg)
   if (errLine && configContent.value) {
     const lines = configContent.value.split('\n')
     let currentSection: FormSection | null = null
@@ -384,8 +401,17 @@ const erroneousSection = computed<FormSection | null>(() => {
 })
 
 function highlightErrorLineInEditor(lineNum?: number | null) {
+  const isAttached = !!(editorView.value && editorContainer.value && editorContainer.value.contains(editorView.value.dom))
+  if (!isAttached) {
+    if (editorContainer.value) {
+      initEditor(configContent.value)
+    } else {
+      return
+    }
+  }
   if (!editorView.value) return
-  const target = lineNum || errorLineInfo.value?.line
+
+  const target = lineNum || errorLineInfo.value?.line || activeSyntaxError.value?.line
   if (!target || target <= 0) {
     editorView.value.dispatch({
       effects: setErrorLineEffect.of(null)
@@ -393,7 +419,7 @@ function highlightErrorLineInEditor(lineNum?: number | null) {
     return
   }
   const doc = editorView.value.state.doc
-  const validLine = Math.min(target, doc.lines)
+  const validLine = Math.min(Math.max(1, target), doc.lines)
   const line = doc.line(validLine)
   editorView.value.dispatch({
     effects: setErrorLineEffect.of(validLine),
@@ -402,15 +428,18 @@ function highlightErrorLineInEditor(lineNum?: number | null) {
   })
 }
 
-function switchToCodeAndLocate(targetLine?: number) {
+async function switchToCodeAndLocate(targetLine?: number) {
+  if (validationStatus.value.valid !== false && !activeSyntaxError.value) {
+    await syncModelToCode()
+  }
   currentMode.value = 'code'
-  const lineToJump = targetLine || errorLineInfo.value?.line || 1
-  setTimeout(() => {
-    if (!editorView.value) {
-      initEditor(configContent.value)
-    }
-    highlightErrorLineInEditor(lineToJump)
-  }, 60)
+  await nextTick()
+  const isAttached = !!(editorView.value && editorContainer.value && editorContainer.value.contains(editorView.value.dom))
+  if (!isAttached && editorContainer.value) {
+    initEditor(configContent.value)
+  }
+  const lineToJump = targetLine || errorLineInfo.value?.line || activeSyntaxError.value?.line || 1
+  highlightErrorLineInEditor(lineToJump)
 }
 
 function quickInsertDnsRule(condition: string, preferredTarget?: string) {
@@ -594,10 +623,14 @@ function initEditor(content: string) {
 
   if (editorView.value) {
     editorView.value.destroy()
+    editorView.value = null
   }
+  editorContainer.value.innerHTML = ''
+
+  const textToLoad = content ?? configContent.value ?? ''
 
   const startState = EditorState.create({
-    doc: content,
+    doc: textToLoad,
     extensions: [
       lineNumbers(),
       history(),
@@ -608,8 +641,17 @@ function initEditor(content: string) {
         if (update.docChanged) {
           configContent.value = update.state.doc.toString()
           isDirty.value = true
-          validationStatus.value.checked = false
-          editorView.value?.dispatch({ effects: setErrorLineEffect.of(null) })
+          if (activeSyntaxError.value) {
+            const rechecked = findErrorLineInContent(configContent.value, activeSyntaxError.value.message)
+            if (rechecked) {
+              activeSyntaxError.value = rechecked
+              if (editorView.value && rechecked.line) {
+                const doc = editorView.value.state.doc
+                const validLine = Math.min(rechecked.line, doc.lines)
+                editorView.value.dispatch({ effects: setErrorLineEffect.of(validLine) })
+              }
+            }
+          }
         }
       }),
       EditorView.theme({
@@ -646,18 +688,21 @@ function initEditor(content: string) {
 }
 
 function setEditorText(text: string) {
-  if (!editorView.value) {
-    initEditor(text)
+  configContent.value = text
+  isDirty.value = false
+  const isAttached = !!(editorView.value && editorContainer.value && editorContainer.value.contains(editorView.value.dom))
+  if (!isAttached) {
+    if (editorContainer.value) {
+      initEditor(text)
+    }
     return
   }
-  const curr = editorView.value.state.doc.toString()
+  const curr = editorView.value!.state.doc.toString()
   if (curr !== text) {
-    editorView.value.dispatch({
+    editorView.value!.dispatch({
       changes: { from: 0, to: curr.length, insert: text }
     })
   }
-  configContent.value = text
-  isDirty.value = false
 }
 
 async function fetchConfigProfiles() {
@@ -688,8 +733,18 @@ async function loadConfig(profileName?: string) {
       const data = await resRaw.json()
       configPath.value = data.path
       lastModTime.value = data.modTime
+      configContent.value = data.content
       setEditorText(data.content)
-      validateContent(data.content, false)
+      const prof = configProfiles.value.find(p => p.name === target)
+      if (prof && prof.isValid === false && prof.errorMsg) {
+        activeSyntaxError.value = findErrorLineInContent(data.content, prof.errorMsg)
+        validationStatus.value = {
+          checked: true,
+          valid: false,
+          message: prof.errorMsg
+        }
+      }
+      await validateContent(data.content, false)
     }
     if (resModel.ok) {
       const m = await resModel.json()
@@ -725,31 +780,37 @@ async function loadConfig(profileName?: string) {
   }
 }
 
-function openEditProfile(name: string, targetTab?: FormSection, jumpToCode?: boolean) {
+async function openEditProfile(name: string, targetTab?: FormSection, jumpToCode?: boolean) {
   currentSelectedConfig.value = name
-  loadConfig(name)
   viewLevel.value = 'detail'
   if (jumpToCode) {
     currentMode.value = 'code'
-    setTimeout(() => {
-      if (!editorView.value) {
-        initEditor(configContent.value)
-      }
-      if (errorLineInfo.value?.line) {
-        highlightErrorLineInEditor(errorLineInfo.value.line)
-      }
-    }, 70)
   } else {
     currentMode.value = 'form'
-    setTimeout(() => {
-      if (targetTab) {
-        activeSection.value = targetTab
-      } else if (erroneousSection.value) {
-        activeSection.value = erroneousSection.value
-      } else {
-        activeSection.value = 'global'
-      }
-    }, 70)
+    if (targetTab) {
+      activeSection.value = targetTab
+    }
+  }
+  await nextTick()
+  await loadConfig(name)
+  await nextTick()
+  if (jumpToCode || currentMode.value === 'code') {
+    const isAttached = !!(editorView.value && editorContainer.value && editorContainer.value.contains(editorView.value.dom))
+    if (!isAttached && editorContainer.value) {
+      initEditor(configContent.value)
+    }
+    const lineToHighlight = errorLineInfo.value?.line || activeSyntaxError.value?.line
+    if (lineToHighlight) {
+      highlightErrorLineInEditor(lineToHighlight)
+    }
+  } else {
+    if (targetTab) {
+      activeSection.value = targetTab
+    } else if (erroneousSection.value) {
+      activeSection.value = erroneousSection.value
+    } else {
+      activeSection.value = 'global'
+    }
   }
 }
 
@@ -1091,17 +1152,37 @@ function importSelectedSubNodes() {
 }
 
 async function switchMode(mode: Mode) {
-  if (currentMode.value === mode) return
+  if (currentMode.value === mode) {
+    if (mode === 'code') {
+      await nextTick()
+      const isAttached = !!(editorView.value && editorContainer.value && editorContainer.value.contains(editorView.value.dom))
+      if (!isAttached && editorContainer.value) {
+        initEditor(configContent.value)
+      }
+      const lineToHighlight = errorLineInfo.value?.line || activeSyntaxError.value?.line
+      if (lineToHighlight) {
+        highlightErrorLineInEditor(lineToHighlight)
+      }
+    }
+    return
+  }
 
   if (mode === 'code') {
-    await syncModelToCode()
+    if (validationStatus.value.valid !== false && !activeSyntaxError.value) {
+      await syncModelToCode()
+    }
     currentMode.value = 'code'
-    setTimeout(() => {
+    await nextTick()
+    const isAttached = !!(editorView.value && editorContainer.value && editorContainer.value.contains(editorView.value.dom))
+    if (!isAttached && editorContainer.value) {
       initEditor(configContent.value)
-      if (errorLineInfo.value?.line) {
-        highlightErrorLineInEditor(errorLineInfo.value.line)
-      }
-    }, 50)
+    } else if (editorView.value) {
+      setEditorText(configContent.value)
+    }
+    const lineToHighlight = errorLineInfo.value?.line || activeSyntaxError.value?.line
+    if (lineToHighlight) {
+      highlightErrorLineInEditor(lineToHighlight)
+    }
   } else {
     currentMode.value = 'form'
     await loadConfig(currentSelectedConfig.value)
@@ -1146,13 +1227,16 @@ async function validateContent(content: string, showAlert = true) {
       message: data.message || (data.valid ? t('config.val_valid') : t('config.val_invalid'))
     }
     if (!data.valid) {
-      if (currentMode.value === 'code' && errorLineInfo.value?.line) {
-        highlightErrorLineInEditor(errorLineInfo.value.line)
+      const err = findErrorLineInContent(content, data.message)
+      activeSyntaxError.value = err
+      if (currentMode.value === 'code' && err?.line) {
+        highlightErrorLineInEditor(err.line)
       }
       if (showAlert) {
         alert(t('config.val_error_alert', { message: data.message }))
       }
     } else {
+      activeSyntaxError.value = null
       if (editorView.value) {
         editorView.value.dispatch({ effects: setErrorLineEffect.of(null) })
       }
@@ -1194,9 +1278,22 @@ async function saveConfig() {
     const data = await res.json()
     if (res.ok) {
       isDirty.value = false
+      activeSyntaxError.value = null
       alert(t('config.save_success', { name: currentSelectedConfig.value }) + (data.reloaded ? t('config.reloaded_notice') : ''))
       loadConfig(currentSelectedConfig.value)
     } else {
+      if (data.details) {
+        const err = findErrorLineInContent(configContent.value, data.details)
+        activeSyntaxError.value = err
+        validationStatus.value = {
+          checked: true,
+          valid: false,
+          message: data.details
+        }
+        if (currentMode.value === 'code' && err?.line) {
+          highlightErrorLineInEditor(err.line)
+        }
+      }
       alert(t('config.save_fail', { error: data.error || '', details: data.details || '' }))
     }
   } catch (e: any) {
@@ -1652,203 +1749,12 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
-async function fetchModes() {
-  loadingModes.value = true
-  try {
-    const res = await fetch('/api/config/modes')
-    if (res.ok) {
-      const data = await res.json()
-      modesList.value = data.modes || []
-      activeModeId.value = data.activeModeId || 'bypass_cn'
-    }
-  } catch (err) {
-    console.error('Fetch modes error:', err)
-  } finally {
-    loadingModes.value = false
-  }
-}
-
-async function applyMode(mode: RoutingModeItem) {
-  if (applyingModeId.value) return
-  applyingModeId.value = mode.id
-  try {
-    const res = await fetch('/api/config/modes/apply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ modeId: mode.id })
-    })
-    const data = await res.json()
-    if (res.ok && data.ok) {
-      activeModeId.value = mode.id
-      if (data.content) {
-        setEditorText(data.content)
-      }
-      const modelRes = await fetch('/api/config/model')
-      if (modelRes.ok) {
-        configModel.value = await modelRes.json()
-      }
-      isDirty.value = false
-      alert(data.message || `已成功应用「${mode.name}」`)
-    } else {
-      alert(data.error || '应用模式失败')
-    }
-  } catch (err: any) {
-    alert(err.message || '网络请求错误')
-  } finally {
-    applyingModeId.value = null
-  }
-}
-
-async function runFastTestForMode(modeId: string) {
-  testingModeId.value = modeId
-  try {
-    const res = await fetch('/api/config/modes/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ modeId })
-    })
-    if (res.ok) {
-      const data = await res.json()
-      const m = modesList.value.find(item => item.id === modeId)
-      if (m && data.testResults) {
-        m.testResults = data.testResults
-      }
-    }
-  } catch (err) {
-    console.error('Test mode error:', err)
-  } finally {
-    testingModeId.value = null
-  }
-}
-
-function openViewRules(mode: RoutingModeItem) {
-  viewingMode.value = mode
-  showModeRulesModal.value = true
-}
-
-function openNewModeModal() {
-  createModeStep.value = 1
-  newModeForm.value = {
-    id: '',
-    name: '',
-    description: '',
-    badge: '自定义',
-    dnsSettings: {
-      ipVersionPrefer: 4,
-      fixedDomainTTL: 0,
-      optimisticCache: false,
-      upstreams: [
-        { tag: 'alidns', address: 'udp://223.5.5.5:53' },
-        { tag: 'googledns', address: 'tcp+udp://dns.google:53' }
-      ],
-      requestRules: [
-        { condition: 'qname(geosite:cn)', target: 'alidns' }
-      ],
-      fallback: 'googledns'
-    },
-    rulesText: 'pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct\ndip(224.0.0.0/3, "ff00::/8") -> direct\ndip(geoip:private) -> direct\ndomain(geosite:category-ads-all) -> block\ndomain(geosite:cn) -> direct\ndip(geoip:cn) -> direct\nfallback: proxy'
-  }
-  showNewModeModal.value = true
-}
-
-function proceedToModeConfigStep2() {
-  if (!newModeForm.value.name.trim()) {
-    alert(t('modes.new_name_label') + '不能为空')
-    return
-  }
-  createModeStep.value = 2
-}
-
-async function saveCustomMode(andActivate: boolean = false) {
-  if (!newModeForm.value.name.trim()) {
-    alert(t('modes.new_name_label') + '不能为空')
-    return
-  }
-  const rawLines = newModeForm.value.rulesText.split('\n')
-  const rules: RoutingModeRule[] = []
-  for (const l of rawLines) {
-    const trimmed = l.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
-    if (trimmed.includes('->')) {
-      const [c, t] = trimmed.split('->')
-      rules.push({ condition: c.trim(), target: t.trim() })
-    } else if (trimmed.startsWith('fallback:') || trimmed.startsWith('fallback :')) {
-      const parts = trimmed.split(':')
-      rules.push({ condition: 'fallback', target: parts[1].trim() })
-    }
-  }
-  if (rules.length === 0) {
-    alert('请输入至少一条有效的路由规则 (格式: condition -> target)')
-    return
-  }
-
-  savingNewMode.value = true
-  try {
-    const res = await fetch('/api/config/modes/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: newModeForm.value.id || undefined,
-        name: newModeForm.value.name.trim(),
-        description: newModeForm.value.description.trim(),
-        badge: newModeForm.value.badge.trim() || '自定义',
-        dnsSettings: newModeForm.value.dnsSettings,
-        rules
-      })
-    })
-    const data = await res.json()
-    if (res.ok && data.ok) {
-      showNewModeModal.value = false
-      await fetchModes()
-      if (andActivate) {
-        const created = modesList.value.find(m => m.id === data.id || m.name === newModeForm.value.name.trim())
-        if (created) {
-          await applyMode(created)
-        } else {
-          alert('模式已保存，正在应用...')
-          await applyMode({
-            id: data.id || 'custom',
-            name: newModeForm.value.name.trim(),
-            description: newModeForm.value.description.trim(),
-            badge: newModeForm.value.badge.trim(),
-            isCustom: true,
-            dnsSettings: newModeForm.value.dnsSettings,
-            rules,
-            testResults: []
-          })
-        }
-      } else {
-        alert(t('common.save') + '成功')
-      }
-    } else {
-      alert(data.error || '创建自定义模式失败')
-    }
-  } catch (err: any) {
-    alert(err.message || '请求错误')
-  } finally {
-    savingNewMode.value = false
-  }
-}
-
-async function deleteCustomMode(mode: RoutingModeItem) {
-  if (!confirm(t('modes.del_confirm', { name: mode.name }))) return
-  try {
-    const res = await fetch(`/api/config/modes/${mode.id}`, { method: 'DELETE' })
-    if (res.ok) {
-      await fetchModes()
-    }
-  } catch (err) {
-    console.error('Delete mode error:', err)
-  }
-}
-
 onMounted(async () => {
   await fetchConfigProfiles()
   if (configProfiles.value.length > 0) {
     const active = configProfiles.value.find(p => p.isActive)
     currentSelectedConfig.value = active ? active.name : configProfiles.value[0].name
   }
-  await fetchModes()
 })
 </script>
 
@@ -2040,7 +1946,7 @@ onMounted(async () => {
         <div class="toolbar-left">
           <button
             class="btn btn-secondary btn-sm btn-back"
-            @click="viewLevel = 'list'"
+            @click="backToProfilesList"
             :title="t('config.btn_back_to_profiles')"
           >
             <ArrowLeft :size="14" />
@@ -2239,17 +2145,6 @@ onMounted(async () => {
                 <AlertTriangle :size="11" /> 错误
               </span>
               <span v-else class="count-pill">{{ configModel.routingRules.length }}</span>
-            </button>
-
-            <!-- 7. Routing Modes (Linked DNS + Rules Collection) -->
-            <button
-              class="subnav-item"
-              :class="{ active: activeSection === 'modes', 'subnav-has-error': erroneousSection === 'routing' || erroneousSection === 'dns' }"
-              @click="activeSection = 'modes'"
-            >
-              <Compass :size="15" />
-              <span>{{ t('config.tab_modes') }}</span>
-              <span class="count-pill badge-active-mode">{{ getActiveModeBadge() }}</span>
             </button>
           </div>
 
@@ -3206,147 +3101,6 @@ onMounted(async () => {
               </table>
             </div>
           </div>
-
-          <!-- Section 7: Routing Modes (分流模式：DNS设置+分流规则联动集合) -->
-          <div v-else-if="activeSection === 'modes'" class="form-section-body">
-            <div class="section-title-bar">
-              <div>
-                <h3>{{ t('modes.title') }}</h3>
-                <p>{{ t('modes.subtitle') }}</p>
-              </div>
-              <button class="btn btn-primary" @click="openNewModeModal">
-                <Plus :size="14" /> {{ t('modes.btn_new') }}
-              </button>
-            </div>
-
-            <!-- Modes Cards Grid -->
-            <div class="modes-grid">
-              <div
-                v-for="mode in modesList"
-                :key="mode.id"
-                class="mode-card"
-                :class="{ 'mode-active': mode.id === activeModeId }"
-              >
-                <!-- Card Header -->
-                <div class="mode-card-header">
-                  <div class="mode-title-wrap">
-                    <div class="mode-icon-avatar" :class="mode.id">
-                      <Shield v-if="mode.id === 'gfwlist'" :size="20" />
-                      <Compass v-else-if="mode.id === 'bypass_cn'" :size="20" />
-                      <Flag v-else-if="mode.id === 'only_cn'" :size="20" />
-                      <Globe v-else-if="mode.id === 'global'" :size="20" />
-                      <Sliders v-else :size="20" />
-                    </div>
-                    <div>
-                      <div class="mode-name-row">
-                        <h4>{{ mode.name }}</h4>
-                        <span class="mode-tag">{{ mode.badge }}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Bug 2 Fixed: Top-right corner prominent active badge or Apply button -->
-                  <div class="mode-actions">
-                    <div v-if="mode.id === activeModeId" class="badge-active-prominent">
-                      <CheckCircle2 :size="14" />
-                      <span>{{ t('modes.active_badge_icon') }}</span>
-                    </div>
-                    <button
-                      v-else
-                      class="btn btn-primary btn-sm btn-apply-mode"
-                      :disabled="applyingModeId === mode.id"
-                      @click="applyMode(mode)"
-                    >
-                      <Check v-if="applyingModeId !== mode.id" :size="13" />
-                      <RefreshCw v-else :size="13" class="spin" />
-                      <span>{{ applyingModeId === mode.id ? t('modes.applying') : t('modes.apply_this_mode') }}</span>
-                    </button>
-                    <button
-                      v-if="mode.isCustom"
-                      class="btn-icon-subtle danger"
-                      @click="deleteCustomMode(mode)"
-                      :title="t('common.delete')"
-                    >
-                      <Trash2 :size="13" />
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Card Body / Desc -->
-                <p class="mode-desc">{{ mode.description }}</p>
-
-                <!-- Rules & Fast Test Bar -->
-                <div class="mode-meta-bar">
-                  <div class="rules-info">
-                    <span class="rules-count-pill">{{ mode.rules.length }} 条分流规则</span>
-                    <!-- Bug 1 Fixed: Click triggers openViewRules -->
-                    <button class="btn-text-link" @click="openViewRules(mode)">
-                      <Eye :size="13" />
-                      <span>{{ t('modes.view_rules', { count: mode.rules.length }) }}</span>
-                    </button>
-                  </div>
-                  <button
-                    class="btn btn-secondary btn-xs btn-fast-test"
-                    :disabled="testingModeId === mode.id"
-                    @click="runFastTestForMode(mode.id)"
-                  >
-                    <Zap :size="12" :class="{ 'text-warning': testingModeId !== mode.id, spin: testingModeId === mode.id }" />
-                    <span>{{ testingModeId === mode.id ? t('modes.fast_testing') : t('modes.fast_test') }}</span>
-                  </button>
-                </div>
-
-                <!-- Fast Test Results Panel -->
-                <div class="mode-test-panel">
-                  <div class="test-panel-header">
-                    <span class="test-panel-title">
-                      <Zap :size="13" class="text-warning" />
-                      {{ t('modes.test_panel_title') }}
-                    </span>
-                    <span class="test-hint">{{ t('modes.test_panel_desc') }}</span>
-                  </div>
-                  <div class="test-items-list">
-                    <div
-                      v-for="item in mode.testResults"
-                      :key="item.id"
-                      class="test-item-row"
-                    >
-                      <div class="item-col target-col">
-                        <span class="target-name">{{ item.name }}</span>
-                        <span class="target-cat">{{ item.category }}</span>
-                      </div>
-
-                      <div class="item-col out-col">
-                        <span
-                          class="badge-out"
-                          :class="{
-                            'out-direct': item.expectedOut.includes('direct') || item.expectedOut.includes('直连'),
-                            'out-proxy': item.expectedOut.includes('proxy') || item.expectedOut.includes('代理'),
-                            'out-block': item.expectedOut.includes('block') || item.expectedOut.includes('阻断')
-                          }"
-                        >
-                          {{ item.expectedOut }}
-                        </span>
-                      </div>
-
-                      <div class="item-col rule-col" :title="item.matchedRule">
-                        <code>{{ item.matchedRule }}</code>
-                      </div>
-
-                      <div class="item-col latency-col">
-                        <span class="latency-badge" :class="item.latency < 40 ? 'fast' : (item.latency < 90 ? 'medium' : 'slow')">
-                          {{ item.latency }} ms
-                        </span>
-                      </div>
-
-                      <div class="item-col detail-col" :title="item.message">
-                        <span class="detail-text">{{ item.message }}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
         <!-- 2. Code Editor Mode -->
@@ -3953,215 +3707,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Bug 1 Fixed: View Mode Rules & DNS Collection Modal -->
-    <div v-if="showModeRulesModal && viewingMode" class="modal-backdrop" @click.self="showModeRulesModal = false">
-      <div class="modal-card modal-lg">
-        <div class="modal-header">
-          <div class="modal-title-wrap">
-            <Eye :size="18" class="text-primary mr-2" />
-            <h3>{{ t('modes.rules_modal_title', { name: viewingMode.name }) }}</h3>
-          </div>
-          <button class="btn-icon-subtle" @click="showModeRulesModal = false">
-            <X :size="16" />
-          </button>
-        </div>
-        <div class="modal-body modal-scroll-body">
-          <p class="modal-notice-text">{{ t('modes.rules_modal_desc') }}</p>
 
-          <!-- 1. DNS Settings of this mode -->
-          <div v-if="viewingMode.dnsSettings" class="mode-dns-preview-card mb-3 p-3 bg-subtle rounded border">
-            <div class="preview-header mb-2 flex-align-center">
-              <Globe :size="15" class="text-info mr-2" />
-              <strong class="text-sm">{{ t('modes.dns_section_title') }}</strong>
-              <span class="text-xs text-muted ml-2" v-if="viewingMode.dnsSettings.ipVersionPrefer">
-                (首选 IPv{{ viewingMode.dnsSettings.ipVersionPrefer }})
-              </span>
-            </div>
-            <div class="preview-content">
-              <div class="dns-preview-row mb-1">
-                <span class="text-xs text-muted mr-2 font-semibold">上游服务器:</span>
-                <span v-for="u in viewingMode.dnsSettings.upstreams" :key="u.tag" class="tag-pill mr-1 mb-1 inline-block">
-                  {{ u.tag }}: {{ u.address }}
-                </span>
-              </div>
-              <div v-if="viewingMode.dnsSettings.requestRules?.length" class="dns-preview-row">
-                <span class="text-xs text-muted mr-2 font-semibold">DNS 路由:</span>
-                <span v-for="(dr, di) in viewingMode.dnsSettings.requestRules" :key="di" class="tag-pill-subtle mr-1 mb-1 inline-block">
-                  {{ dr.condition }} &rarr; {{ dr.target }}
-                </span>
-                <span v-if="viewingMode.dnsSettings.fallback" class="tag-pill-subtle inline-block">
-                  fallback &rarr; {{ viewingMode.dnsSettings.fallback }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 2. Routing Rules of this mode -->
-          <div class="rules-table-container">
-            <div class="preview-header mb-2 flex-align-center">
-              <GitFork :size="15" class="text-primary mr-2" />
-              <strong class="text-sm">{{ t('modes.routing_section_title') }} ({{ viewingMode.rules.length }} 条)</strong>
-            </div>
-            <table class="rules-table">
-              <thead>
-                <tr>
-                  <th style="width: 50px">#</th>
-                  <th>{{ t('modes.col_condition') }}</th>
-                  <th style="width: 140px">{{ t('modes.col_target') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(r, idx) in viewingMode.rules" :key="idx">
-                  <td class="rule-idx">{{ idx + 1 }}</td>
-                  <td class="rule-cond mono">{{ r.condition }}</td>
-                  <td class="rule-target">
-                    <span
-                      class="badge-out"
-                      :class="{
-                        'out-direct': r.target.includes('direct'),
-                        'out-proxy': r.target.includes('proxy'),
-                        'out-block': r.target.includes('block')
-                      }"
-                    >
-                      {{ r.target }}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showModeRulesModal = false">{{ t('common.close') }}</button>
-          <button
-            v-if="viewingMode.id !== activeModeId"
-            class="btn btn-primary"
-            :disabled="applyingModeId === viewingMode.id"
-            @click="applyMode(viewingMode); showModeRulesModal = false"
-          >
-            <Check :size="14" />
-            <span>{{ t('modes.apply_this_mode') }}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Create Custom Routing Mode (Two-Step Flow: Step 1: Info -> Step 2: Unified DNS + Rules) -->
-    <div v-if="showNewModeModal" class="modal-backdrop" @click.self="showNewModeModal = false">
-      <div class="modal-card modal-lg">
-        <div class="modal-header">
-          <div class="modal-title-wrap">
-            <Plus :size="18" class="text-primary mr-2" />
-            <h3 v-if="createModeStep === 1">{{ t('modes.create_step1_title') }}</h3>
-            <h3 v-else>{{ t('modes.create_step2_title') }}</h3>
-          </div>
-          <button class="btn-icon-subtle" @click="showNewModeModal = false">
-            <X :size="16" />
-          </button>
-        </div>
-
-        <!-- Step 1: Mode Name & Description -->
-        <div v-if="createModeStep === 1" class="modal-body">
-          <div class="form-group">
-            <label class="form-label required">{{ t('modes.new_name_label') }}</label>
-            <input
-              v-model="newModeForm.name"
-              class="form-control"
-              :placeholder="t('modes.new_name_ph')"
-            />
-          </div>
-          <div class="form-group mt-3">
-            <label class="form-label">{{ t('modes.new_badge_label') }}</label>
-            <input
-              v-model="newModeForm.badge"
-              class="form-control"
-              :placeholder="t('modes.new_badge_ph')"
-            />
-          </div>
-          <div class="form-group mt-3">
-            <label class="form-label">{{ t('modes.new_desc_label') }}</label>
-            <textarea
-              v-model="newModeForm.description"
-              class="form-control"
-              rows="3"
-              :placeholder="t('modes.new_desc_ph')"
-            ></textarea>
-          </div>
-        </div>
-
-        <!-- Step 2: Unified DNS Settings + Routing Rules on ONE PAGE -->
-        <div v-else class="modal-body modal-scroll-body">
-          <p class="modal-notice-text">
-            分流模式是 DNS 设置 + 分流规则的联动集合。当切换到此模式时，以下 DNS 设置与分流规则将同时写入配置文件。
-          </p>
-
-          <!-- 1. DNS Settings Section -->
-          <div class="mode-config-section mb-4 p-3 bg-subtle rounded border">
-            <div class="preview-header mb-2 flex-align-center">
-              <Globe :size="15" class="text-info mr-2" />
-              <strong class="text-sm">{{ t('modes.dns_section_title') }}</strong>
-            </div>
-            <div class="form-grid-2 mb-2">
-              <div>
-                <label class="text-xs text-muted block mb-1">首选 IP 解析版本:</label>
-                <select v-model.number="newModeForm.dnsSettings.ipVersionPrefer" class="form-control form-control-sm">
-                  <option :value="4">IPv4 优先 (推荐)</option>
-                  <option :value="6">IPv6 优先</option>
-                  <option :value="0">自动</option>
-                </select>
-              </div>
-              <div>
-                <label class="text-xs text-muted block mb-1">默认回退 DNS (Fallback):</label>
-                <select v-model="newModeForm.dnsSettings.fallback" class="form-control form-control-sm">
-                  <option v-for="u in newModeForm.dnsSettings.upstreams" :key="u.tag" :value="u.tag">{{ u.tag }}</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="text-xs text-muted mb-1 font-semibold">上游 DNS 服务器列表:</div>
-            <div v-for="(u, idx) in newModeForm.dnsSettings.upstreams" :key="idx" class="flex-gap mb-1">
-              <input v-model="u.tag" class="form-control form-control-xs w-1/3" placeholder="tag (如 alidns)" />
-              <input v-model="u.address" class="form-control form-control-xs flex-1 mono" placeholder="address (如 udp://223.5.5.5:53)" />
-              <button class="btn-icon-subtle danger" @click="newModeForm.dnsSettings.upstreams.splice(idx, 1)"><Trash2 :size="12" /></button>
-            </div>
-            <button class="btn btn-secondary btn-xs mt-1" @click="newModeForm.dnsSettings.upstreams.push({ tag: 'dns_' + (newModeForm.dnsSettings.upstreams.length + 1), address: 'udp://223.5.5.5:53' })">
-              <Plus :size="12" /> 添加上游 DNS
-            </button>
-          </div>
-
-          <!-- 2. Routing Rules Section -->
-          <div class="mode-config-section p-3 bg-subtle rounded border">
-            <div class="preview-header mb-2 flex-align-center">
-              <GitFork :size="15" class="text-primary mr-2" />
-              <strong class="text-sm">{{ t('modes.routing_section_title') }}</strong>
-            </div>
-            <label class="form-label required">{{ t('modes.new_rules_label') }}</label>
-            <textarea
-              v-model="newModeForm.rulesText"
-              class="form-control mono text-xs"
-              rows="8"
-              :placeholder="t('modes.new_rules_ph')"
-            ></textarea>
-          </div>
-        </div>
-
-        <!-- Modal Footer -->
-        <div class="modal-actions">
-          <button v-if="createModeStep === 1" class="btn btn-secondary" @click="showNewModeModal = false">{{ t('common.cancel') }}</button>
-          <button v-if="createModeStep === 1" class="btn btn-primary" @click="proceedToModeConfigStep2">
-            {{ t('modes.step_next') }} &rarr;
-          </button>
-
-          <button v-if="createModeStep === 2" class="btn btn-secondary" @click="createModeStep = 1">{{ t('modes.step_prev') }}</button>
-          <button v-if="createModeStep === 2" class="btn btn-secondary" :disabled="savingNewMode" @click="saveCustomMode(false)">
-            {{ t('modes.btn_save_mode') }}
-          </button>
-          <button v-if="createModeStep === 2" class="btn btn-primary" :disabled="savingNewMode" @click="saveCustomMode(true)">
-            <Check :size="14" /> {{ t('modes.btn_save_and_apply') }}
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- Syntax Error Details Modal -->
     <div v-if="showSyntaxErrorModal && currentErrorProfile" class="modal-backdrop" @click.self="showSyntaxErrorModal = false">
@@ -4700,13 +4246,33 @@ onMounted(async () => {
 /* Editor Wrapper */
 .editor-wrapper {
   flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   position: relative;
   overflow: hidden;
   background: var(--bg-card, #0f172a);
 }
 
 .editor-host {
+  flex: 1;
+  min-height: 0;
   height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.editor-host :deep(.cm-editor) {
+  height: 100%;
+  width: 100%;
+  outline: none;
+}
+
+.editor-host :deep(.cm-scroller) {
+  height: 100%;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 /* Status Bar */
@@ -6711,42 +6277,53 @@ onMounted(async () => {
 
 /* Code Editor Error Banner */
 .code-editor-error-banner {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 14px;
-  background: rgba(239, 68, 68, 0.12);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
-  font-size: 12px;
-  gap: 12px;
+  padding: 10px 16px;
+  background: #380a0a;
+  border-bottom: 2px solid #ef4444;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  gap: 14px;
+  z-index: 30;
+  position: relative;
 }
 
 .code-editor-error-banner .banner-body-text {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .code-editor-error-banner .banner-error-msg {
   color: #fca5a5;
-  font-size: 11px;
-  max-width: 600px;
+  font-size: 12px;
+  max-width: 800px;
+  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .code-editor-error-banner .btn-jump {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
-  padding: 3px 8px;
+  gap: 6px;
+  border: 1px solid #ef4444;
+  background: rgba(239, 68, 68, 0.25);
+  color: #fecaca;
+  padding: 4px 10px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 .code-editor-error-banner .btn-jump:hover {

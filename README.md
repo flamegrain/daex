@@ -1,9 +1,17 @@
-# dae WebUI
+<p align="center">
+  <img src="frontend/public/logo-128.png" width="96" height="96" alt="daeX Logo" />
+</p>
+
+<h1 align="center">daeX 控制台 (dae-webui)</h1>
 
 <p align="center">
-  <b>新一代 Linux eBPF 透明代理控制台与可视化网关面板</b>
+  <b>新一代 Linux eBPF 透明代理控制台与现代化可视化网关面板</b>
   <br />
-  <i>轻量级 · 高性能 · 单二进制零依赖 · 现代美观 · 100% 完整中英双语</i>
+  <i>轻量级 · 高性能 · 单二进制嵌入零依赖 · 现代美观 · 100% 完整中英双语</i>
+</p>
+
+<p align="center">
+  <a href="README.md"><b>简体中文</b></a> | <a href="README_EN.md"><b>English</b></a>
 </p>
 
 <p align="center">
@@ -14,16 +22,67 @@
 
 ---
 
+## 📸 界面预览 (UI Screenshots)
+
+### 1. 实时网络流量大盘与节点测速 (Dashboard)
+毫秒级上/下行动态速率折线、内核工作状态、实时出站连通性模拟测试（阿里、Google、GitHub、YouTube、OpenAI）与就绪代理节点概览。
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" width="100%" alt="daeX Dashboard" />
+</p>
+
+---
+
+### 2. 4 步沉浸式新手快速设置向导 (Quick Setup Wizard)
+专为非专业用户设计的快速向导：智能探测物理网卡与部署场景、订阅与多格式节点批量导入、预设分流联动、直观三色（快速/慢速/无法连接）连通性诊断并自动归档方案。
+<p align="center">
+  <img src="docs/screenshots/quick-setup.png" width="100%" alt="daeX Quick Setup" />
+</p>
+
+---
+
+### 3. 多方案配置管理与语法校验 (Configuration Management)
+支持多套 `.dae` 方案独立归档、一键设为生效、实时语法合法性校验、错误模块标红与源码精准高亮、配置文件快速导入/导出备份。
+<p align="center">
+  <img src="docs/screenshots/config.png" width="100%" alt="daeX Configuration Management" />
+</p>
+
+---
+
+### 4. 可视化分流规则引擎与预设库 (Routing Rules)
+遵循 dae 官方「首条命中即终止 (First-Match-Wins)」原则，提供自由拖拽排序、健康遮蔽检测、国内直连保护与官方高频模板库（基础直连、境外代理、广告阻断等）。
+<p align="center">
+  <img src="docs/screenshots/routing.png" width="100%" alt="daeX Routing Rules" />
+</p>
+
+---
+
+### 5. 节点与出站策略组管理 (Nodes & Policies)
+支持 VLESS, VMess, Trojan, Shadowsocks, Hysteria2 等协议节点解析、多分组策略调度（min_moving_avg、min_avg10、fallback、random）及订阅源自动拉取。
+<p align="center">
+  <img src="docs/screenshots/nodes.png" width="100%" alt="daeX Nodes and Policies" />
+</p>
+
+---
+
+### 6. 系统服务管理与一键自检 (Service & Diagnostics)
+无缝对接 systemd 守护进程，提供运行指标（PID、内存、CPU、运行时长）、启动/停止/重启/重载全生命周期操作，内置一键系统健康诊断报告。
+<p align="center">
+  <img src="docs/screenshots/service.png" width="100%" alt="daeX Service Management" />
+</p>
+
+---
+
 ## 🌟 核心功能特性
 
 - 🚀 **单二进制嵌入架构**：基于 Go 标准库后端 + 嵌入式 Vue 3 单页前端，无外置 Python、PHP 或 Nginx 依赖，单文件极速部署，开箱即用。
+- 🪄 **快速设置向导**：面向非专业用户的 4 步极简向导，智能推荐旁路由/单机网卡参数，支持机场订阅与节点链接一键解析导入，提供醒目三色测速与一键应用归档。
 - 📊 **实时网络流量大盘**：毫秒级上/下行实时速率流、动态速率折线图表，以及一键连通性快速探测面板（阿里云、Google、GitHub、YouTube、OpenAI）。
-- 🔀 **可视化条件分流规则引擎**：严格遵循 dae 官方「首条命中即终止 (First-Match-Wins)」决策原则，内置结构化条件构造器、局域网私网直连与兜底规则保护，支持鼠标自由拖拽排序。
+- 🔀 **可视化条件分流规则引擎**：严格遵循 dae 官方决策原则，内置结构化条件构造器、局域网私网直连与兜底规则保护，支持鼠标自由拖拽排序与规则遮蔽检测。
 - 📚 **官方预设模板库与语法指南**：内置基础直连、广告阻断、境外加速、AI 工具等高频预设模板，支持一键填入表单及在线同步最新模板。
 - 🌐 **节点与出站策略组管理**：支持多种协议节点识别与批量解析、多策略分组调度（min_moving_avg、min_avg10 等）及外部订阅源聚合。
 - 📜 **全功能日志管理与调试**：系统分流日志实时捕获、级别筛选高亮（INFO/WARN/ERROR/DEBUG）、关键字快速检索、独立下拉快照备份管理及日志文件导出。
-- ⚙️ **系统服务管理控制面板**：无缝对接 systemd，提供 dae 核心与 WebUI 控制台的实时状态感知、运行指标（PID、内存、CPU、运行时长）、生命周期操作（启动、停止、重启、热重载、开机自启）及最近 journalctl 日志集成。
-- 🔄 **系统自动更新与规则库同步**：直接对接 GitHub 官方发行版本，可视化展示更新日志并支持一键升级 dae 主程序及 geosite/geoip 规则库。
+- ⚙️ **系统服务管理控制面板**：无缝对接 systemd，提供 dae 核心与 WebUI 控制台的实时状态感知、运行指标、生命周期操作及最近 journalctl 日志集成。
+- 🩺 **全方位系统自检诊断 (Doctor)**：一键排查 Linux 内核版本、eBPF 挂载、配置语法合法性与网卡路由健康。
 - 🌓 **双主题与多语言**：支持深色/浅色界面平滑切换，100% 完整中英文语言环境无缝切换。
 
 ---
@@ -35,7 +94,7 @@
 在 Linux 服务器（需 root 权限）上执行以下单行命令，脚本将自动识别硬件架构并配置 systemd 守护进程：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daeuniverse/dae-webui/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.sh | bash
 ```
 
 > **提示**：如果中国大陆地区访问 GitHub 较慢，可通过 Git 镜像或克隆源码执行。
@@ -46,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/daeuniverse/dae-webui/main/install.
 
 ```bash
 # 自定义监听端口 9091 并指定 dae 配置文件
-curl -fsSL https://raw.githubusercontent.com/daeuniverse/dae-webui/main/install.sh | bash -s -- --port 9091 --config /usr/local/etc/dae/config.dae
+curl -fsSL https://raw.githubusercontent.com/Mikelee2022/dae-webui/main/install.sh | bash -s -- --port 9091 --config /usr/local/etc/dae/config.dae
 ```
 
 ### 3. 从源码目录就地安装
@@ -54,7 +113,7 @@ curl -fsSL https://raw.githubusercontent.com/daeuniverse/dae-webui/main/install.
 如果你已将本项目代码克隆至服务器，可直接执行根目录下的自动化脚本：
 
 ```bash
-git clone https://github.com/daeuniverse/dae-webui.git /opt/dae-webui
+git clone https://github.com/Mikelee2022/dae-webui.git /opt/dae-webui
 cd /opt/dae-webui
 
 # 执行自动化安装与服务注册
@@ -136,7 +195,7 @@ systemctl enable dae-webui
 
 ## ⚙️ 启动参数与环境变量
 
-若需手动启动或在容器/脚本中运行，可使用以下命令行选项或等价的环境变量：
+若需手动启动或在脚本中运行，可使用以下命令行选项或等价的环境变量：
 
 | 启动标志 (Flag) | 环境变量 (ENV) | 默认值 | 作用说明 |
 |---|---|---|---|
@@ -145,24 +204,17 @@ systemctl enable dae-webui
 | `-dae-bin` | `DAE_BIN` | `/usr/local/bin/dae` | dae 核心程序执行路径 |
 | `-dae-service` | `DAE_SERVICE` | `dae` | 底层由 systemd 托管的 dae 服务名称 |
 | `-backup-dir` | `DAE_BACKUP_DIR` | `<config_dir>/backups` | 配置文件历史备份与快照目录 |
-| `-allow-system-config` | - | `false` | 允许直接加载 `/usr/local/etc/dae/` 生产目录中的配置文件 |
+| `-allow-system-config` | `DAE_ALLOW_SYSTEM_CONFIG` | `false` | 允许直接加载 `/etc/dae/` 或 `/usr/local/etc/dae/` 生产目录中的配置文件 |
 
 ---
 
-## 🩺 系统自检与运行环境诊断 (Doctor / Self-Check)
+## 🩺 系统自检与运行环境诊断 (Doctor)
 
 dae 基于 Linux 内核 eBPF 技术，对操作系统内核版本、BPF 文件系统挂载及路由规则格式有特定要求。项目提供命令行与 Web 控制台双模自检诊断：
 
 ### 1. 命令行自检
 ```bash
-# 方式一：使用安装管理脚本
 sudo ./install.sh doctor
-
-# 方式二：直接执行自检脚本
-sudo ./scripts/doctor.sh
-
-# 方式三：开发者环境
-make doctor
 ```
 
 自检项目涵盖：
@@ -173,37 +225,11 @@ make doctor
 - ✅ **dae 配置文件语法**（自动调用 `dae validate -c` 检测合法性）
 - ✅ **路由规则库资源**（检查 `geosite.dat` 与 `geoip.dat` 完整性）
 - ✅ **dae-webui 服务运行状态**（systemd 活跃度与 HTTP 端口监听）
-- ✅ **默认出口网络路由**（检查默认网关与对外接口）
 - ✅ **配置安全权限**（验证敏感配置文件权限是否符合 `0600`）
 
-### 2. WebUI 网页一键自检
-在管理后台左侧导航栏 **「服务管理」** 页面，点击顶部 **「🩺 系统自检」** 按钮，即可实时触发多维度健康诊断并弹出可视化体检报告，支持一键复制体检报告用于运维排障。
-
 ---
 
-## 🗑️ 安全卸载与清理 (Uninstall)
-
-项目提供独立的卸载脚本 `uninstall.sh`，同时也支持通过 `./install.sh uninstall` 执行：
-
-### 1. 标准卸载（推荐，保留配置与数据）
-停止并注销 systemd 服务，移除可执行二进制文件与系统服务文件，**完整保留** `/etc/dae-webui/` 配置文件与日志数据：
-```bash
-sudo ./uninstall.sh
-# 或
-sudo ./install.sh uninstall
-```
-
-### 2. 彻底清除卸载（Purge）
-如需连同所有配置文件、规则草稿、备份快照和日志文件一并清除：
-```bash
-sudo ./uninstall.sh --purge
-# 或静默非交互式彻底清理：
-sudo ./uninstall.sh -y --purge
-```
-
----
-
-## 💻 开发者指南 (从源码编译与打包)
+## 💻 开发者指南 (从源码编译)
 
 ### 前置环境需求
 - **Go** >= 1.22 (推荐 1.24+)
@@ -222,27 +248,16 @@ cd ../backend
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(date +%Y%m%d-%H%M)" -o ../bin/dae-webui .
 ```
 
-### 2. 跨平台打包发布
-执行项目提供的自动化打包脚本，可自动生成 Linux x86_64 与 aarch64 的发布包及校验和：
-```bash
-./scripts/build-release.sh [版本号]
-```
-构建产物将保存在 `release/` 目录中：
-- `dae-webui-linux-amd64.tar.gz`
-- `dae-webui-linux-arm64.tar.gz`
-- `sha256sums.txt`
-
 ---
 
-## 🔒 数据安全与生产最佳实践
+## 🔒 数据安全与最佳实践
 
 1. **配置文件权限保护**：所有生成的 dae 配置文件与备份均自动受 `0600` 严格文件权限保护，避免非特权用户读取代理凭证。
 2. **反向代理与 HTTPS**：推荐配合 Nginx / Caddy 等反向代理工具配置 SSL/TLS 证书，开启 HTTPS 加密访问面板。
-3. **安全审计日志**：重要配置修改及版本切换均在 `/var/log/dae-webui/` 目录下保留历史版本，支持在管理后台一键回滚。
+3. **安全审计日志**：重要配置修改及版本切换均在备份目录下保留历史快照，支持一键回滚。
 
 ---
 
 ## 📄 开源许可证
 
 本项目基于 [MIT License](LICENSE) 协议开源。
-EOF
