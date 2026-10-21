@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 sync() { make -s sync; }
 
 sync
-echo "[watch] initial sync done -> ${VM:-root@192.168.3.10}:${REMOTE:-/opt/dae-webui}"
+echo "[watch] initial sync done -> ${VM:-root@192.168.3.10}:${REMOTE:-/opt/daex}"
 
 if command -v fswatch >/dev/null; then
   echo "[watch] using fswatch"

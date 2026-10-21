@@ -164,7 +164,7 @@ Once installed, navigate to the console in your browser:
 
 ## 🖥️ Systemd Service Management
 
-`daex` is registered as a standard systemd service: `daex.service` (with `/usr/local/bin/dae-webui` compatibility symlink).
+`daex` is registered as a standard systemd service: `daex.service`.
 
 ```bash
 # Check status

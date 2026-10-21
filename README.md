@@ -172,7 +172,7 @@ sudo ./install.sh [命令] [选项]
 
 ## 🖥️ systemd 系统服务常用管理
 
-daeX 默认注册为标准的 systemd 服务：`daex.service`（同时创建 `/usr/local/bin/dae-webui` 兼容软链接）。
+daeX 默认注册为标准的 systemd 服务：`daex.service`。
 
 ```bash
 # 查看服务运行状态

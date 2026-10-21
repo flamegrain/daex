@@ -1,11 +1,11 @@
-# air hot-reload config (runs on the VM via dae-webui-dev-api.service)
+# air hot-reload config (runs on the VM via daex-dev-api.service)
 root = "."
 tmp_dir = "tmp"
 
 [build]
   pre_cmd = ["mkdir -p internal/webui/dist && touch internal/webui/dist/.keep"]
-  cmd = "go build -o ./tmp/dae-webui ."
-  entrypoint = ["./tmp/dae-webui", "-listen", "0.0.0.0:8080", "-dae-config", "../config.mock.dae"]
+  cmd = "go build -o ./tmp/daex ."
+  entrypoint = ["./tmp/daex", "-listen", "0.0.0.0:8080", "-dae-config", "../config.mock.dae"]
   include_ext = ["go"]
   exclude_dir = ["tmp", "internal/webui/dist"]
   delay = 500

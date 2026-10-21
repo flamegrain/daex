@@ -106,13 +106,17 @@ detect_dae_config() {
 
     # 2. 如果未从 service 中提取到，尝试检测常见官方路径
     if [[ -z "${detected_cfg}" || ! -f "${detected_cfg}" ]]; then
+        # 兼容迁移旧版配置
+        if [[ ! -f "/etc/daex/config.dae" && -f "/etc/dae-webui/config.dae" ]]; then
+            mkdir -p "/etc/daex"
+            cp -n "/etc/dae-webui/config.dae" "/etc/daex/config.dae" 2>/dev/null || true
+        fi
+
         local candidates=(
             "/usr/local/etc/dae/config.dae"
             "/etc/dae/config.dae"
             "/etc/daex/config.dae"
             "/opt/daex/config.mock.dae"
-            "/etc/dae-webui/config.dae"
-            "/opt/dae-webui/config.mock.dae"
         )
         for cand in "${candidates[@]}"; do
             if [[ -f "${cand}" ]]; then
@@ -187,15 +191,15 @@ get_local_ip() {
 install_binary() {
     info "准备安装 daeX 主程序..."
 
-    # 1. 优先检查当前运行目录是否已有编译好的 bin/daex 或 dae-webui
+    # 1. 优先检查当前运行目录是否已有编译好的 bin/daex 或 daex
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-    for candidate in "${script_dir}/bin/daex" "${script_dir}/daex" "${script_dir}/bin/dae-webui" "${script_dir}/dae-webui"; do
+    for candidate in "${script_dir}/bin/daex" "${script_dir}/daex"; do
         if [[ -f "${candidate}" ]]; then
             info "使用当前源码目录已编译的二进制: ${candidate}"
             install -m 755 "${candidate}" "${TARGET_BIN}"
-            ln -sf "${TARGET_BIN}" "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
+            rm -f "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
             return 0
         fi
     done
@@ -209,7 +213,7 @@ install_binary() {
                 cd "${script_dir}/backend" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(date +%Y%m%d-%H%M)" -o "${script_dir}/bin/daex" .
             )
             install -m 755 "${script_dir}/bin/daex" "${TARGET_BIN}"
-            ln -sf "${TARGET_BIN}" "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
+            rm -f "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
             success "编译并安装完成: ${TARGET_BIN}"
             return 0
         fi
@@ -221,35 +225,24 @@ install_binary() {
     local tmp_dir
     tmp_dir="$(mktemp -d)"
 
-    # 优先下载 daex 发行包，若旧版本不存在则回退尝试 dae-webui 发行包
-    local download_urls=()
+    local download_url=""
     if [[ "${release_tag}" == "latest" ]]; then
-        download_urls+=(
-            "https://github.com/${GITHUB_REPO}/releases/latest/download/daex-linux-${ARCH}.tar.gz"
-            "https://github.com/${GITHUB_REPO}/releases/latest/download/dae-webui-linux-${ARCH}.tar.gz"
-        )
+        download_url="https://github.com/${GITHUB_REPO}/releases/latest/download/daex-linux-${ARCH}.tar.gz"
     else
-        download_urls+=(
-            "https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/daex-linux-${ARCH}.tar.gz"
-            "https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/dae-webui-linux-${ARCH}.tar.gz"
-        )
+        download_url="https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/daex-linux-${ARCH}.tar.gz"
     fi
 
-    for download_url in "${download_urls[@]}"; do
-        info "下载地址: ${download_url}"
-        if curl -fL --progress-bar "${download_url}" -o "${tmp_dir}/archive.tar.gz" 2>/dev/null || wget -q --show-progress "${download_url}" -O "${tmp_dir}/archive.tar.gz" 2>/dev/null; then
-            tar -zxf "${tmp_dir}/archive.tar.gz" -C "${tmp_dir}"
-            if [[ -f "${tmp_dir}/daex" ]]; then
-                install -m 755 "${tmp_dir}/daex" "${TARGET_BIN}"
-            elif [[ -f "${tmp_dir}/dae-webui" ]]; then
-                install -m 755 "${tmp_dir}/dae-webui" "${TARGET_BIN}"
-            fi
-            ln -sf "${TARGET_BIN}" "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
-            rm -rf "${tmp_dir}"
-            success "预编译二进制已安装至: ${TARGET_BIN} (兼容别名: ${INSTALL_BIN_DIR}/dae-webui)"
-            return 0
+    info "下载地址: ${download_url}"
+    if curl -fL --progress-bar "${download_url}" -o "${tmp_dir}/archive.tar.gz" 2>/dev/null || wget -q --show-progress "${download_url}" -O "${tmp_dir}/archive.tar.gz" 2>/dev/null; then
+        tar -zxf "${tmp_dir}/archive.tar.gz" -C "${tmp_dir}"
+        if [[ -f "${tmp_dir}/daex" ]]; then
+            install -m 755 "${tmp_dir}/daex" "${TARGET_BIN}"
         fi
-    done
+        rm -f "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
+        rm -rf "${tmp_dir}"
+        success "预编译二进制已安装至: ${TARGET_BIN}"
+        return 0
+    fi
 
     rm -rf "${tmp_dir}"
     fatal "无法获取或编译 daeX 二进制，请检查网络或在源码目录中先运行 'make deploy'！"
@@ -267,6 +260,10 @@ configure_service() {
         info "检测到运行中的旧版 dae-webui 服务，正在停止以切换至 daex 服务..."
         systemctl stop dae-webui 2>/dev/null || true
         systemctl disable dae-webui 2>/dev/null || true
+    fi
+    if [[ -f "/etc/systemd/system/dae-webui.service" ]]; then
+        info "正在清理旧版服务文件: /etc/systemd/system/dae-webui.service"
+        rm -f "/etc/systemd/system/dae-webui.service"
     fi
 
     # 检查若配置文件不存在则初始化

@@ -80,10 +80,10 @@ vm-deps:
 	cd backend && go mod download
 
 vm-dev-install:
-	install -m 644 deploy/dae-webui-dev-api.service deploy/dae-webui-dev-web.service /etc/systemd/system/
+	install -m 644 deploy/daex-dev-api.service deploy/daex-dev-web.service /etc/systemd/system/
 	systemctl daemon-reload
-	systemctl enable --now dae-webui-dev-api dae-webui-dev-web
-	systemctl restart dae-webui-dev-api dae-webui-dev-web
+	systemctl enable --now daex-dev-api daex-dev-web
+	systemctl restart daex-dev-api daex-dev-web
 
 vm-build:
 	cd frontend && pnpm install --frozen-lockfile && pnpm build
@@ -91,7 +91,7 @@ vm-build:
 
 vm-deploy:
 	install -m 755 bin/daex /usr/local/bin/daex
-	ln -sf /usr/local/bin/daex /usr/local/bin/dae-webui
+	rm -f /usr/local/bin/dae-webui 2>/dev/null || true
 	install -m 644 deploy/daex.service /etc/systemd/system/
 	systemctl daemon-reload
 	systemctl enable daex

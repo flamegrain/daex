@@ -129,7 +129,7 @@ async function runSystemDoctor() {
 
 function copyDoctorReport() {
   if (!doctorReport.value) return
-  let text = `=== dae-webui 系统运行环境与健康自检报告 ===\n时间: ${doctorReport.value.timestamp}\n总体状态: ${doctorReport.value.status}\n检查统计: 共 ${doctorReport.value.summary.total} 项 (通过: ${doctorReport.value.summary.passed}, 警告: ${doctorReport.value.summary.warning}, 失败: ${doctorReport.value.summary.failed})\n\n详细检查项:\n`
+  let text = `=== daeX 系统运行环境与健康自检报告 ===\n时间: ${doctorReport.value.timestamp}\n总体状态: ${doctorReport.value.status}\n检查统计: 共 ${doctorReport.value.summary.total} 项 (通过: ${doctorReport.value.summary.passed}, 警告: ${doctorReport.value.summary.warning}, 失败: ${doctorReport.value.summary.failed})\n\n详细检查项:\n`
   for (const c of doctorReport.value.checks) {
     text += `[${c.status.toUpperCase()}] ${c.name}: ${c.message} ${c.detail ? '(' + c.detail + ')' : ''}\n`
   }
@@ -541,7 +541,7 @@ onUnmounted(() => {
             </div>
             <div>
               <div class="title-row">
-                <h3>{{ t('service.webui_title') }} ({{ servicesData?.webui?.name || 'dae-webui.service' }})</h3>
+                <h3>{{ t('service.webui_title') }} ({{ servicesData?.webui?.name || 'daex.service' }})</h3>
                 <!-- Status Badge -->
                 <span
                   class="badge-state"
@@ -641,7 +641,7 @@ onUnmounted(() => {
             <div class="logs-title-left">
               <Terminal :size="14" class="text-accent" />
               <span>{{ t('service.logs_title') }}</span>
-              <span class="logs-tag">journalctl -u {{ servicesData?.webui?.name || 'dae-webui' }}</span>
+              <span class="logs-tag">journalctl -u {{ servicesData?.webui?.name || 'daex' }}</span>
             </div>
             <div class="logs-header-actions" @click.stop>
               <button

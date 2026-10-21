@@ -1,11 +1,11 @@
 [Unit]
-Description=dae-webui DEV backend (air hot reload, :8080)
+Description=daex DEV backend (air hot reload, :8080)
 After=network-online.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/dae-webui/backend
+WorkingDirectory=/opt/daex/backend
 Environment=HOME=/root
 Environment=PATH=/usr/local/go/bin:/root/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/root/go/bin/air -c .air.toml
