@@ -64,11 +64,6 @@ jobs:
             rm -f daex
             sha256sum "${tar_name}" >> sha256sums.txt
             sha256sum "${bin_name}" >> sha256sums.txt
-
-            # 同时生成兼容别名副本
-            cp "${tar_name}" "dae-webui-linux-${arch}.tar.gz"
-            cp "${bin_name}" "dae-webui-linux-${arch}"
-            sha256sum "dae-webui-linux-${arch}.tar.gz" >> sha256sums.txt
           done
 
       - name: Create or Update GitHub Release
@@ -84,8 +79,4 @@ jobs:
             release/daex-linux-arm64.tar.gz
             release/daex-linux-amd64
             release/daex-linux-arm64
-            release/dae-webui-linux-amd64.tar.gz
-            release/dae-webui-linux-arm64.tar.gz
-            release/dae-webui-linux-amd64
-            release/dae-webui-linux-arm64
             release/sha256sums.txt

@@ -44,11 +44,6 @@ for arch in amd64 arm64; do
     sha256sum "${tar_name}" >> sha256sums.txt
     sha256sum "${bin_name}" >> sha256sums.txt
     echo "  - 已生成: ${tar_name}"
-
-    # 同时保留兼容名称副本
-    cp "${tar_name}" "dae-webui-linux-${arch}.tar.gz"
-    cp "${bin_name}" "dae-webui-linux-${arch}"
-    sha256sum "dae-webui-linux-${arch}.tar.gz" >> sha256sums.txt
 done
 
 echo ""
