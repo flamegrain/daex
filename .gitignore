@@ -3,6 +3,7 @@ backend/tmp/
 backend/internal/webui/dist/*
 !backend/internal/webui/dist/.keep
 bin/
+release/
 *.log
 .DS_Store
 
