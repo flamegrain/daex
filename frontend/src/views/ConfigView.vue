@@ -47,6 +47,8 @@ import {
   Zap,
   Eye,
   Flag,
+  Radio,
+  Search,
   X
 } from 'lucide-vue-next'
 import {
@@ -564,17 +566,189 @@ const editingNode = ref<ConfigNodeItem>({
   port: ''
 })
 
+// Overview nodes and subscriptions for reactive group linkage
+interface OverviewNodeItem {
+  key: string
+  protocol: string
+  name: string
+  address: string
+  port: string
+  country: string
+  flag: string
+  active: boolean
+  latency: number
+}
+
+interface OverviewSubItem {
+  tag: string
+  url: string
+  nodeCount: number
+}
+
+const overviewNodes = ref<OverviewNodeItem[]>([])
+const overviewSubscriptions = ref<OverviewSubItem[]>([])
+const loadingOverview = ref(false)
+
+async function fetchNodesOverview() {
+  loadingOverview.value = true
+  try {
+    const res = await fetch('/api/nodes/overview')
+    if (res.ok) {
+      const data = await res.json()
+      overviewNodes.value = data.nodes || []
+      overviewSubscriptions.value = data.subscriptions || []
+    }
+  } catch (e) {
+    console.error('Failed to fetch nodes overview in config view:', e)
+  } finally {
+    loadingOverview.value = false
+  }
+}
+
+const availableSubscriptions = computed(() => {
+  const map = new Map<string, { tag: string; url: string; nodeCount: number }>()
+  for (const s of overviewSubscriptions.value) {
+    map.set(s.tag, { tag: s.tag, url: s.url, nodeCount: s.nodeCount || 0 })
+  }
+  for (const s of configModel.value.subscriptions) {
+    if (!map.has(s.tag)) {
+      map.set(s.tag, { tag: s.tag, url: s.url, nodeCount: 0 })
+    }
+  }
+  return Array.from(map.values())
+})
+
+const availableNodes = computed(() => {
+  const map = new Map<string, OverviewNodeItem>()
+  for (const n of overviewNodes.value) {
+    map.set(n.key, n)
+  }
+  for (const n of configModel.value.nodes) {
+    if (!map.has(n.key)) {
+      map.set(n.key, {
+        key: n.key,
+        name: n.name || n.key,
+        protocol: n.protocol || 'TCP',
+        address: n.address || '',
+        port: n.port || '',
+        country: '自建',
+        flag: '🛡️',
+        active: true,
+        latency: 15
+      })
+    }
+  }
+  return Array.from(map.values())
+})
+
+interface EditingGroupState {
+  name: string
+  sourceType: 'sub' | 'nodes' | 'custom'
+  selectedSubTag: string
+  selectedNodeKeys: string[]
+  policyMode: 'min_moving_avg' | 'min_avg10' | 'min' | 'random' | 'fixed'
+  fixedNodeIndex: number
+  customFilterText: string
+}
+
 const showGroupModal = ref(false)
 const groupModalMode = ref<'add' | 'edit'>('add')
-const editingGroup = ref<{
-  name: string
-  policy: string
-  filtersText: string
-}>({
+const nodeSearchQuery = ref('')
+
+const editingGroup = ref<EditingGroupState>({
   name: '',
-  policy: 'min_moving_avg',
-  filtersText: ''
+  sourceType: 'sub',
+  selectedSubTag: '',
+  selectedNodeKeys: [],
+  policyMode: 'min_moving_avg',
+  fixedNodeIndex: 0,
+  customFilterText: ''
 })
+
+const groupCandidateNodes = computed(() => {
+  if (editingGroup.value.sourceType === 'sub') {
+    const sub = editingGroup.value.selectedSubTag.toLowerCase()
+    if (!sub) return []
+    const matched = availableNodes.value.filter(n => {
+      const k = n.key.toLowerCase()
+      const nm = n.name.toLowerCase()
+      return k.includes(sub) || nm.includes(sub)
+    })
+    if (matched.length === 0 && availableSubscriptions.value.length === 1) {
+      return availableNodes.value
+    }
+    return matched
+  } else if (editingGroup.value.sourceType === 'nodes') {
+    const keys = editingGroup.value.selectedNodeKeys
+    return keys.map(k => availableNodes.value.find(n => n.key === k)).filter(Boolean) as OverviewNodeItem[]
+  } else {
+    return availableNodes.value
+  }
+})
+
+const filteredAllNodes = computed(() => {
+  const q = nodeSearchQuery.value.trim().toLowerCase()
+  if (!q) return availableNodes.value
+  return availableNodes.value.filter(n =>
+    n.name.toLowerCase().includes(q) ||
+    n.key.toLowerCase().includes(q) ||
+    n.protocol.toLowerCase().includes(q) ||
+    n.address.toLowerCase().includes(q)
+  )
+})
+
+const generatedPolicyString = computed(() => {
+  if (editingGroup.value.policyMode === 'fixed') {
+    return `fixed(${editingGroup.value.fixedNodeIndex})`
+  }
+  return editingGroup.value.policyMode
+})
+
+const generatedFilters = computed(() => {
+  if (editingGroup.value.sourceType === 'sub') {
+    if (editingGroup.value.selectedSubTag) {
+      return [`subtag(${editingGroup.value.selectedSubTag})`]
+    }
+    return []
+  } else if (editingGroup.value.sourceType === 'nodes') {
+    if (editingGroup.value.selectedNodeKeys.length > 0) {
+      return [`name(${editingGroup.value.selectedNodeKeys.join(', ')})`]
+    }
+    return []
+  } else {
+    return editingGroup.value.customFilterText.split('\n').map(s => s.trim().replace(/^filter:\s*/, '')).filter(Boolean)
+  }
+})
+
+const groupDaePreview = computed(() => {
+  const name = editingGroup.value.name.trim() || 'my_group'
+  const pol = generatedPolicyString.value
+  const filts = generatedFilters.value.map(f => `        filter: ${f}`).join('\n') || '        # 未设定过滤规则'
+  return `group {\n    ${name} {\n${filts}\n        policy: ${pol}\n    }\n}`
+})
+
+function toggleSelectNodeKey(key: string) {
+  const idx = editingGroup.value.selectedNodeKeys.indexOf(key)
+  if (idx >= 0) {
+    editingGroup.value.selectedNodeKeys.splice(idx, 1)
+  } else {
+    editingGroup.value.selectedNodeKeys.push(key)
+  }
+  if (editingGroup.value.fixedNodeIndex >= editingGroup.value.selectedNodeKeys.length) {
+    editingGroup.value.fixedNodeIndex = 0
+  }
+}
+
+function selectAllFilteredNodes() {
+  const keys = filteredAllNodes.value.map(n => n.key)
+  const set = new Set([...editingGroup.value.selectedNodeKeys, ...keys])
+  editingGroup.value.selectedNodeKeys = Array.from(set)
+}
+
+function clearSelectedNodes() {
+  editingGroup.value.selectedNodeKeys = []
+  editingGroup.value.fixedNodeIndex = 0
+}
 
 const showRouteModal = ref(false)
 const routeModalMode = ref<'add' | 'edit'>('add')
@@ -772,6 +946,7 @@ async function loadConfig(profileName?: string) {
       }
     }
     await fetchConfigProfiles()
+    await fetchNodesOverview()
     isDirty.value = false
   } catch (err: any) {
     alert(t('config.load_fail', { error: err.message }))
@@ -1349,49 +1524,105 @@ function deleteNode(key: string) {
 }
 
 // Group CRUD
-function openAddGroup() {
+async function openAddGroup() {
+  await fetchNodesOverview()
   groupModalMode.value = 'add'
+  const defaultSub = availableSubscriptions.value[0]?.tag || ''
   editingGroup.value = {
-    name: 'custom_group',
-    policy: 'min_moving_avg',
-    filtersText: 'filter: subtag(mock_sub_a)'
+    name: '',
+    sourceType: defaultSub ? 'sub' : (availableNodes.value.length > 0 ? 'nodes' : 'custom'),
+    selectedSubTag: defaultSub,
+    selectedNodeKeys: availableNodes.value.slice(0, 3).map(n => n.key),
+    policyMode: 'min_moving_avg',
+    fixedNodeIndex: 0,
+    customFilterText: ''
   }
+  nodeSearchQuery.value = ''
   showGroupModal.value = true
 }
 
-function openEditGroup(g: ConfigGroupItem) {
+async function openEditGroup(g: ConfigGroupItem) {
+  await fetchNodesOverview()
   groupModalMode.value = 'edit'
+  
+  let sourceType: 'sub' | 'nodes' | 'custom' = 'custom'
+  let selectedSubTag = ''
+  let selectedNodeKeys: string[] = []
+  let customFilterText = (g.filters || []).join('\n')
+
+  if (g.filters && g.filters.length > 0) {
+    const first = g.filters[0].trim()
+    if (first.startsWith('subtag(') && first.endsWith(')')) {
+      sourceType = 'sub'
+      selectedSubTag = first.slice(7, -1).trim().replace(/['"]/g, '')
+    } else if (first.startsWith('name(') && first.endsWith(')') && !first.includes('keyword:')) {
+      sourceType = 'nodes'
+      selectedNodeKeys = first.slice(5, -1).split(',').map(s => s.trim().replace(/['"]/g, '')).filter(Boolean)
+    }
+  }
+
+  let policyMode: 'min_moving_avg' | 'min_avg10' | 'min' | 'random' | 'fixed' = 'min_moving_avg'
+  let fixedNodeIndex = 0
+  const pol = (g.policy || '').trim()
+  if (pol.startsWith('fixed(') && pol.endsWith(')')) {
+    policyMode = 'fixed'
+    const idxStr = pol.slice(6, -1).trim()
+    fixedNodeIndex = parseInt(idxStr, 10) || 0
+  } else if (['min_moving_avg', 'min_avg10', 'min', 'random'].includes(pol)) {
+    policyMode = pol as any
+  }
+
   editingGroup.value = {
     name: g.name,
-    policy: g.policy,
-    filtersText: g.filters.join('\n')
+    sourceType,
+    selectedSubTag: selectedSubTag || availableSubscriptions.value[0]?.tag || '',
+    selectedNodeKeys,
+    policyMode,
+    fixedNodeIndex,
+    customFilterText
   }
+  nodeSearchQuery.value = ''
   showGroupModal.value = true
 }
 
 function saveGroupModal() {
-  if (!editingGroup.value.name) {
+  const name = editingGroup.value.name.trim()
+  if (!name) {
     alert(t('config.group_name_req'))
     return
   }
-  const filters = editingGroup.value.filtersText
-    .split('\n')
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(s => s.replace(/^filter:\s*/, ''))
+  if (!/^[a-zA-Z0-9_\-]+$/.test(name)) {
+    alert('策略组名称只能包含字母、数字、下划线或减号')
+    return
+  }
+  if (groupModalMode.value === 'add') {
+    if (configModel.value.groups.some(g => g.name === name)) {
+      alert(`已存在名为 "${name}" 的策略组，请使用不同的名称`)
+      return
+    }
+  }
 
+  const filters = generatedFilters.value
+  if (filters.length === 0) {
+    alert('请至少选择一个节点订阅源或指定至少一个节点')
+    return
+  }
+
+  const policy = generatedPolicyString.value
   const groupItem: ConfigGroupItem = {
-    name: editingGroup.value.name,
-    policy: editingGroup.value.policy,
+    name,
+    policy,
     filters
   }
 
   if (groupModalMode.value === 'add') {
     configModel.value.groups.push(groupItem)
   } else {
-    const idx = configModel.value.groups.findIndex(g => g.name === editingGroup.value.name)
+    const idx = configModel.value.groups.findIndex(g => g.name === name)
     if (idx >= 0) {
       configModel.value.groups[idx] = groupItem
+    } else {
+      configModel.value.groups.push(groupItem)
     }
   }
   showGroupModal.value = false
@@ -3173,32 +3404,285 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Group Modal -->
+    <!-- Group Modal (Interactive with Subscriptions, Nodes and Auto Fixed(N) Code) -->
     <div v-if="showGroupModal" class="modal-backdrop" @click.self="showGroupModal = false">
-      <div class="modal-card">
+      <div class="modal-card modal-lg group-editor-modal">
         <div class="modal-header">
-          <h3>{{ t('config.modal.group_title') }}</h3>
+          <div class="modal-title-wrap">
+            <Layers class="modal-title-icon" :size="20" />
+            <div>
+              <h3>{{ groupModalMode === 'add' ? '新增出站策略分组' : `编辑策略分组: ${editingGroup.name}` }}</h3>
+              <span class="modal-subtitle">选择订阅源或节点联动范围，并按需自动生成 fixed(N) 固定节点绑定代码</span>
+            </div>
+          </div>
           <button class="close-btn" @click="showGroupModal = false">&times;</button>
         </div>
-        <div class="modal-body form-modal">
-          <div class="field">
-            <label>{{ t('config.field.group_name') }}</label>
-            <input v-model="editingGroup.name" :disabled="groupModalMode === 'edit'" :placeholder="t('config.field.group_name_ph')" />
+
+        <div class="modal-body form-modal group-modal-body">
+          <!-- Step 1: 分组名称 -->
+          <div class="form-step-card">
+            <div class="step-card-header">
+              <span class="step-badge">1</span>
+              <h4>分组基本标识</h4>
+            </div>
+            <div class="field mb-2">
+              <label>{{ t('config.field.group_name') }} <span class="text-danger">*</span></label>
+              <input
+                v-model="editingGroup.name"
+                :disabled="groupModalMode === 'edit'"
+                :placeholder="t('config.field.group_name_ph')"
+                class="form-control"
+              />
+            </div>
+            <!-- Quick preset names -->
+            <div v-if="groupModalMode === 'add'" class="quick-names-row">
+              <span class="quick-names-lbl">{{ t('config.group.quick_names') }}:</span>
+              <button
+                v-for="qn in ['proxy', 'streaming', 'japan', 'game', 'backup', 'auto']"
+                :key="qn"
+                type="button"
+                class="quick-name-btn"
+                :class="{ active: editingGroup.name === qn }"
+                @click="editingGroup.name = qn"
+              >
+                {{ qn }}
+              </button>
+            </div>
           </div>
-          <div class="field">
-            <label>{{ t('config.field.group_policy') }}</label>
-            <select v-model="editingGroup.policy">
-              <option value="min_moving_avg">min_moving_avg</option>
-              <option value="min_avg10">min_avg10</option>
-              <option value="min">min</option>
-              <option value="random">random</option>
-              <option value="fixed(0)">fixed(0)</option>
-            </select>
+
+          <!-- Step 2: 节点来源联动 -->
+          <div class="form-step-card">
+            <div class="step-card-header">
+              <span class="step-badge">2</span>
+              <h4>{{ t('config.group.step1_title') }}</h4>
+            </div>
+
+            <!-- Source Type Switcher -->
+            <div class="source-type-switcher">
+              <button
+                type="button"
+                class="source-tab-btn"
+                :class="{ active: editingGroup.sourceType === 'sub' }"
+                @click="editingGroup.sourceType = 'sub'"
+              >
+                <Radio class="tab-icon" :size="14" />
+                <span>{{ t('config.group.source_sub') }}</span>
+              </button>
+              <button
+                type="button"
+                class="source-tab-btn"
+                :class="{ active: editingGroup.sourceType === 'nodes' }"
+                @click="editingGroup.sourceType = 'nodes'"
+              >
+                <Server class="tab-icon" :size="14" />
+                <span>{{ t('config.group.source_nodes') }}</span>
+              </button>
+              <button
+                type="button"
+                class="source-tab-btn"
+                :class="{ active: editingGroup.sourceType === 'custom' }"
+                @click="editingGroup.sourceType = 'custom'"
+              >
+                <Code class="tab-icon" :size="14" />
+                <span>{{ t('config.group.source_custom') }}</span>
+              </button>
+            </div>
+
+            <!-- Option A: Subscription linkage -->
+            <div v-if="editingGroup.sourceType === 'sub'" class="source-content-box">
+              <div v-if="availableSubscriptions.length === 0" class="empty-hint-box">
+                <AlertCircle :size="16" class="text-amber" />
+                <span>{{ t('config.group.no_subs') }}</span>
+              </div>
+              <div v-else class="field">
+                <label>{{ t('config.group.select_sub') }}:</label>
+                <select v-model="editingGroup.selectedSubTag" class="form-control">
+                  <option
+                    v-for="s in availableSubscriptions"
+                    :key="s.tag"
+                    :value="s.tag"
+                  >
+                    📡 {{ s.tag }} ({{ s.nodeCount > 0 ? `共 ${s.nodeCount} 个节点` : '订阅源' }})
+                  </option>
+                </select>
+                <div class="sub-matched-stats">
+                  <span class="stat-pill">
+                    {{ t('config.group.candidate_count', { count: groupCandidateNodes.length }) }}
+                  </span>
+                  <span class="filter-code-preview mono">生成语法: subtag({{ editingGroup.selectedSubTag }})</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Option B: Specific Nodes selection -->
+            <div v-else-if="editingGroup.sourceType === 'nodes'" class="source-content-box">
+              <div class="nodes-select-toolbar">
+                <div class="search-input-wrap">
+                  <Search :size="14" class="search-icon" />
+                  <input
+                    v-model="nodeSearchQuery"
+                    class="search-mini"
+                    placeholder="搜索节点名称 / 协议 / IP..."
+                  />
+                </div>
+                <div class="nodes-select-actions">
+                  <button type="button" class="btn-xs" @click="selectAllFilteredNodes">全选匹配</button>
+                  <button type="button" class="btn-xs" @click="clearSelectedNodes">清空</button>
+                  <span class="selected-count-badge">已选 {{ editingGroup.selectedNodeKeys.length }} 个节点</span>
+                </div>
+              </div>
+
+              <div class="nodes-checkbox-list">
+                <label
+                  v-for="n in filteredAllNodes"
+                  :key="n.key"
+                  class="node-check-item"
+                  :class="{ selected: editingGroup.selectedNodeKeys.includes(n.key) }"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="editingGroup.selectedNodeKeys.includes(n.key)"
+                    @change="toggleSelectNodeKey(n.key)"
+                  />
+                  <span class="node-flag">{{ n.flag || '🛡️' }}</span>
+                  <span class="node-name truncate">{{ n.name || n.key }}</span>
+                  <span class="node-proto-badge">{{ n.protocol }}</span>
+                  <span class="node-addr truncate">{{ n.address }}:{{ n.port }}</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Option C: Custom filter syntax -->
+            <div v-else class="source-content-box">
+              <label>{{ t('config.field.group_filters') }}</label>
+              <textarea
+                v-model="editingGroup.customFilterText"
+                rows="3"
+                class="form-control mono"
+                :placeholder="t('config.field.group_filters_ph')"
+              ></textarea>
+            </div>
           </div>
-          <div class="field">
-            <label>{{ t('config.field.group_filters') }}</label>
-            <textarea v-model="editingGroup.filtersText" rows="4" :placeholder="t('config.field.group_filters_ph')"></textarea>
+
+          <!-- Step 3: 选择调度模式与固定节点联动 -->
+          <div class="form-step-card">
+            <div class="step-card-header">
+              <span class="step-badge">3</span>
+              <h4>{{ t('config.group.step2_title') }}</h4>
+            </div>
+
+            <div class="policy-modes-grid">
+              <label
+                class="policy-mode-card"
+                :class="{ active: editingGroup.policyMode === 'min_moving_avg' }"
+              >
+                <input type="radio" value="min_moving_avg" v-model="editingGroup.policyMode" />
+                <div class="mode-info">
+                  <strong class="mode-title">min_moving_avg</strong>
+                  <span class="mode-desc">最小移动平均延迟 (推荐, 动态防抖最佳选路)</span>
+                </div>
+              </label>
+
+              <label
+                class="policy-mode-card"
+                :class="{ active: editingGroup.policyMode === 'min_avg10' }"
+              >
+                <input type="radio" value="min_avg10" v-model="editingGroup.policyMode" />
+                <div class="mode-info">
+                  <strong class="mode-title">min_avg10</strong>
+                  <span class="mode-desc">最近 10 次平均延迟最小</span>
+                </div>
+              </label>
+
+              <label
+                class="policy-mode-card"
+                :class="{ active: editingGroup.policyMode === 'min' }"
+              >
+                <input type="radio" value="min" v-model="editingGroup.policyMode" />
+                <div class="mode-info">
+                  <strong class="mode-title">min</strong>
+                  <span class="mode-desc">绝对最低瞬时延迟</span>
+                </div>
+              </label>
+
+              <label
+                class="policy-mode-card"
+                :class="{ active: editingGroup.policyMode === 'random' }"
+              >
+                <input type="radio" value="random" v-model="editingGroup.policyMode" />
+                <div class="mode-info">
+                  <strong class="mode-title">random</strong>
+                  <span class="mode-desc">随机均衡调度节点</span>
+                </div>
+              </label>
+
+              <label
+                class="policy-mode-card highlight-fixed"
+                :class="{ active: editingGroup.policyMode === 'fixed' }"
+              >
+                <input type="radio" value="fixed" v-model="editingGroup.policyMode" />
+                <div class="mode-info">
+                  <strong class="mode-title">fixed(N) 固定节点模式 🎯</strong>
+                  <span class="mode-desc">选择固定某个节点，自动生成数字序号代码</span>
+                </div>
+              </label>
+            </div>
+
+            <!-- 固定节点联动选择区 (如果选择 fix() 固定节点模式，选择某个节点，自动生成对应数字代码) -->
+            <div v-if="editingGroup.policyMode === 'fixed'" class="fixed-node-picker-box">
+              <div class="picker-header">
+                <Crosshair :size="16" class="text-primary" />
+                <strong>{{ t('config.group.step3_title') }}</strong>
+                <span class="text-muted">(点击下方候选节点，自动生成数字序号代码)</span>
+              </div>
+
+              <div v-if="groupCandidateNodes.length === 0" class="no-candidate-warn">
+                <AlertCircle :size="16" class="text-amber" />
+                <span>当前节点来源暂无候选节点，请检查上方节点来源设置</span>
+              </div>
+
+              <div v-else class="candidate-nodes-list">
+                <div
+                  v-for="(node, idx) in groupCandidateNodes"
+                  :key="node.key"
+                  class="candidate-node-row"
+                  :class="{ active: editingGroup.fixedNodeIndex === idx }"
+                  @click="editingGroup.fixedNodeIndex = idx"
+                >
+                  <div class="row-left">
+                    <span class="index-badge">[{{ idx }}]</span>
+                    <span class="flag-icon">{{ node.flag || '🛡️' }}</span>
+                    <strong class="node-name truncate">{{ node.name || node.key }}</strong>
+                    <span class="proto-tag">{{ node.protocol }}</span>
+                  </div>
+                  <div class="row-right">
+                    <span class="node-addr truncate">{{ node.address }}:{{ node.port }}</span>
+                    <span v-if="node.latency" class="latency-pill">{{ node.latency }}ms</span>
+                    <span v-if="editingGroup.fixedNodeIndex === idx" class="bound-tag">✓ 已绑定 [{{ idx }}]</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Fixed Code Auto-generation Confirmation Banner -->
+              <div class="fixed-code-banner">
+                <Zap :size="16" class="banner-icon" />
+                <div class="banner-content">
+                  <strong>{{ t('config.group.fixed_hint', { code: `fixed(${editingGroup.fixedNodeIndex})`, index: editingGroup.fixedNodeIndex, name: groupCandidateNodes[editingGroup.fixedNodeIndex]?.name || groupCandidateNodes[editingGroup.fixedNodeIndex]?.key || '节点' }) }}</strong>
+                </div>
+              </div>
+            </div>
           </div>
+
+          <!-- Step 4: 配置代码实时预览 -->
+          <div class="form-step-card preview-card">
+            <div class="step-card-header">
+              <Code class="step-icon" :size="15" />
+              <h4>{{ t('config.group.preview_title') }}</h4>
+            </div>
+            <pre class="dae-preview-code mono">{{ groupDaePreview }}</pre>
+          </div>
+
+          <!-- Actions -->
           <div class="modal-actions">
             <button class="btn btn-secondary" @click="showGroupModal = false">{{ t('common.cancel') }}</button>
             <button class="btn btn-primary" @click="saveGroupModal">{{ t('common.save') }}</button>
@@ -4015,11 +4499,14 @@ onMounted(async () => {
 
 .form-section-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  scrollbar-gutter: stable;
 }
 
 .section-title-bar {
@@ -4683,6 +5170,443 @@ onMounted(async () => {
   gap: 4px;
   font-size: 11px;
   color: var(--text-muted, #94a3b8);
+}
+
+/* =========================================================
+   Group Editor Modal: Linkage with Subs, Nodes & Fixed(N)
+   ========================================================= */
+
+.group-editor-modal {
+  width: 820px;
+  max-width: 95vw;
+}
+
+.modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-title-icon {
+  color: #0284c7;
+}
+
+.modal-subtitle {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.group-modal-body {
+  overflow-y: auto;
+  max-height: calc(85vh - 120px);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-step-card {
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.step-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #0284c7;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.step-card-header h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+}
+
+.quick-names-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.quick-names-lbl {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.quick-name-btn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-card, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quick-name-btn:hover {
+  color: var(--text-main, #f8fafc);
+  border-color: #0284c7;
+}
+
+.quick-name-btn.active {
+  background: rgba(2, 132, 199, 0.2);
+  color: #38bdf8;
+  border-color: #0284c7;
+  font-weight: 600;
+}
+
+.source-type-switcher {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  background: var(--bg-card, #0f172a);
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #1e293b);
+}
+
+.source-tab-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.source-tab-btn.active {
+  background: var(--bg-input, #1e293b);
+  color: #0284c7;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.source-content-box {
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.sub-matched-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.stat-pill {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.filter-code-preview {
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+}
+
+.nodes-select-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-input, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 4px;
+  padding: 2px 8px;
+  flex: 1;
+  min-width: 180px;
+}
+
+.search-input-wrap .search-mini {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main, #f8fafc);
+  font-size: 12px;
+  width: 100%;
+}
+
+.nodes-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: var(--bg-input, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 4px;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+}
+
+.selected-count-badge {
+  font-size: 11px;
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.nodes-checkbox-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 4px;
+  padding: 6px;
+  background: var(--bg-input, #090d16);
+}
+
+.node-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+
+.node-check-item:hover {
+  background: rgba(30, 41, 59, 0.4);
+}
+
+.node-check-item.selected {
+  background: rgba(2, 132, 199, 0.15);
+}
+
+.node-proto-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  font-weight: 600;
+}
+
+.node-addr {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  margin-left: auto;
+}
+
+.policy-modes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.policy-mode-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.policy-mode-card:hover {
+  border-color: #334155;
+}
+
+.policy-mode-card.active {
+  border-color: #0284c7;
+  background: rgba(2, 132, 199, 0.12);
+}
+
+.policy-mode-card.highlight-fixed {
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.policy-mode-card.highlight-fixed.active {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.mode-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mode-title {
+  font-size: 12px;
+  color: var(--text-main, #f8fafc);
+}
+
+.mode-desc {
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.3;
+}
+
+.fixed-node-picker-box {
+  margin-top: 12px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.picker-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 8px;
+  color: var(--text-main, #f8fafc);
+}
+
+.candidate-nodes-list {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.candidate-node-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  background: var(--bg-input, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.candidate-node-row:hover {
+  border-color: #0284c7;
+}
+
+.candidate-node-row.active {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.index-badge {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(2, 132, 199, 0.2);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.proto-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted, #94a3b8);
+}
+
+.row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.latency-pill {
+  font-size: 11px;
+  color: #10b981;
+  font-family: monospace;
+}
+
+.bound-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.2);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.fixed-code-banner {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 5px;
+  color: #10b981;
+  font-size: 12px;
+}
+
+.preview-card {
+  background: var(--bg-card, #0f172a);
+}
+
+.dae-preview-code {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-main, #090d16);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 5px;
+  color: #38bdf8;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-x: auto;
 }
 
 /* =========================================================

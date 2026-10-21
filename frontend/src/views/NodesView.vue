@@ -23,6 +23,10 @@ import {
 } from 'lucide-vue-next'
 import { theme, t } from '../composables/useSettings'
 
+const emit = defineEmits<{
+  (e: 'navigate-tab', tab: string): void
+}>()
+
 interface NodeItem {
   key: string
   protocol: string
@@ -521,6 +525,16 @@ onMounted(() => {
 
       <!-- ================= Tab 2: Policy Groups ================= -->
       <section v-else-if="activeTab === 'groups'" class="groups-container">
+        <div class="groups-action-banner">
+          <div class="banner-text">
+            <h4 class="m-0 text-main">策略分组调度管理 ({{ overview.groups.length }})</h4>
+            <span class="subtext">支持多策略分组管理、节点订阅联动与 fixed(N) 固定节点绑定</span>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="emit('navigate-tab', 'config')">
+            <Layers :size="13" /> 前往配置管理新建/调整策略分组
+          </button>
+        </div>
+
         <div class="groups-grid">
           <div
             v-for="group in overview.groups"
@@ -1197,6 +1211,31 @@ onMounted(() => {
 }
 
 /* Tab 2: Policy Groups */
+.groups-action-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: var(--bg-card, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.banner-text h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+}
+
+.banner-text .subtext {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
 .groups-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));

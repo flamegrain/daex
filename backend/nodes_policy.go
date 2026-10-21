@@ -147,26 +147,40 @@ func getNodesOverview(activeConfigFile string) (NodesOverviewResponse, error) {
 			}
 		}
 
-		// Select optimal node according to group policy
-		var selNode *NodeItem
-		if len(keyList) > 0 {
-			// Find lowest latency by default for min_latency / min_moving_avg
-			bestIdx := 0
-			bestLat := 9999
-			for idx, k := range keyList {
-				n := nodeMap[k]
-				if n.Latency < bestLat {
-					bestLat = n.Latency
-					bestIdx = idx
-				}
-			}
-			chosen := nodeMap[keyList[bestIdx]]
-			selNode = &chosen
-		}
-
 		policyStr := g.Policy
 		if policyStr == "" {
 			policyStr = "min_latency"
+		}
+
+		// Select optimal node according to group policy
+		var selNode *NodeItem
+		if len(keyList) > 0 {
+			if strings.HasPrefix(policyStr, "fixed(") && strings.HasSuffix(policyStr, ")") {
+				idxStr := strings.TrimSuffix(strings.TrimPrefix(policyStr, "fixed("), ")")
+				if fixedIdx, err := strconv.Atoi(strings.TrimSpace(idxStr)); err == nil {
+					if fixedIdx >= 0 && fixedIdx < len(keyList) {
+						chosen := nodeMap[keyList[fixedIdx]]
+						selNode = &chosen
+					} else {
+						chosen := nodeMap[keyList[0]]
+						selNode = &chosen
+					}
+				}
+			}
+			if selNode == nil {
+				// Find lowest latency by default for min_latency / min_moving_avg
+				bestIdx := 0
+				bestLat := 9999
+				for idx, k := range keyList {
+					n := nodeMap[k]
+					if n.Latency < bestLat {
+						bestLat = n.Latency
+						bestIdx = idx
+					}
+				}
+				chosen := nodeMap[keyList[bestIdx]]
+				selNode = &chosen
+			}
 		}
 
 		groupOverviews = append(groupOverviews, GroupOverviewItem{

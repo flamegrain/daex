@@ -5,9 +5,7 @@ After=network-online.target dae.service
 [Service]
 Type=simple
 User=root
-# 当前阶段按项目规则使用假数据。切换到真实配置需显式决定:
-#   -dae-config /usr/local/etc/dae/config.dae -allow-system-config
-ExecStart=/usr/local/bin/daex -listen 0.0.0.0:9091 -dae-config /opt/daex/config.mock.dae
+ExecStart=/usr/local/bin/daex -listen 0.0.0.0:9091 -allow-system-config -backup-dir /var/log/daex/backups
 Restart=on-failure
 RestartSec=3
 

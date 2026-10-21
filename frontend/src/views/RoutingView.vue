@@ -1407,7 +1407,7 @@ onMounted(async () => {
   height: 100%;
   background: var(--bg-main, #090d16);
   color: var(--text-main, #f8fafc);
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 /* Toolbar Header */
@@ -1542,10 +1542,14 @@ onMounted(async () => {
 /* Main Layout */
 .routing-main {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  scrollbar-gutter: stable;
 }
 
 .rules-view-container {

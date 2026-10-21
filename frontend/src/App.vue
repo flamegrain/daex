@@ -232,7 +232,7 @@ onMounted(() => {
       <QuickSetupView v-else-if="activeTab === 'quick-setup'" @navigate-tab="(tab: string) => activeTab = tab as Tab" />
       <ConfigView v-else-if="activeTab === 'config'" />
       <RoutingView v-else-if="activeTab === 'routing'" />
-      <NodesView v-else-if="activeTab === 'nodes'" />
+      <NodesView v-else-if="activeTab === 'nodes'" @navigate-tab="(tab: string) => activeTab = tab as Tab" />
 
       <LogsView v-else-if="activeTab === 'logs'" />
       <ServiceView v-else-if="activeTab === 'service'" />
@@ -275,6 +275,39 @@ html[data-theme="light"] {
 /* Reset and global layout */
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle, #334155) transparent;
+}
+
+/* Custom modern scrollbars across the app */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle, #334155);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted, #64748b);
+}
+
+[data-theme="light"] * {
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 html, body {
