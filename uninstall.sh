@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# dae-webui 自动化卸载与清理脚本
-# 项目主页: https://github.com/daeuniverse/dae-webui
+# daeX 自动化卸载与清理脚本
+# 项目主页: https://github.com/flamegrain/daex
 # ==============================================================================
 
 set -e
 
-APP_NAME="dae-webui"
+APP_NAME="daex"
 INSTALL_BIN="/usr/local/bin/${APP_NAME}"
+LEGACY_BIN="/usr/local/bin/dae-webui"
 SYSTEMD_SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
-CONFIG_DIR="/etc/dae-webui"
-LOG_BACKUP_DIR="/var/log/dae-webui"
+LEGACY_SERVICE_FILE="/etc/systemd/system/dae-webui.service"
+CONFIG_DIR="/etc/daex"
+LEGACY_CONFIG_DIR="/etc/dae-webui"
+LOG_BACKUP_DIR="/var/log/daex"
+LEGACY_LOG_DIR="/var/log/dae-webui"
 
 # 输出着色
 RED='\033[0;31m'
@@ -50,7 +54,7 @@ check_root() {
 
 show_help() {
     cat <<EOF
-dae-webui 自动化卸载脚本
+daeX 自动化卸载脚本
 
 用法:
   $0 [选项]
@@ -106,12 +110,12 @@ check_root
 
 echo ""
 echo -e "${RED}${BOLD}================================================================${NC}"
-echo -e "${RED}${BOLD}           ⚠️  dae-webui 卸载与清理向导${NC}"
+echo -e "${RED}${BOLD}           ⚠️  daeX 卸载与清理向导${NC}"
 echo -e "${RED}${BOLD}================================================================${NC}"
 echo ""
 
 if [[ "${NON_INTERACTIVE}" != "true" ]]; then
-    read -r -p "确认停止并卸载 dae-webui 吗? [y/N]: " confirm_uninstall
+    read -r -p "确认停止并卸载 daeX 吗? [y/N]: " confirm_uninstall
     if [[ ! "${confirm_uninstall}" =~ ^[Yy]$ ]]; then
         info "用户取消卸载操作。"
         exit 0
@@ -126,21 +130,24 @@ if [[ "${NON_INTERACTIVE}" != "true" ]]; then
 fi
 
 # 1. 停止与注销生产 systemd 服务
-info "[1/4] 停止并注销 dae-webui 系统服务..."
-if systemctl is-active --quiet "${APP_NAME}" 2>/dev/null; then
-    systemctl stop "${APP_NAME}" 2>/dev/null || true
-    info "已停止正在运行的 ${APP_NAME} 服务"
-fi
+info "[1/4] 停止并注销 daeX 系统服务..."
+for svc in "${APP_NAME}" "dae-webui"; do
+    if systemctl is-active --quiet "${svc}" 2>/dev/null; then
+        systemctl stop "${svc}" 2>/dev/null || true
+        info "已停止正在运行的 ${svc} 服务"
+    fi
+    if systemctl is-enabled --quiet "${svc}" 2>/dev/null; then
+        systemctl disable "${svc}" 2>/dev/null || true
+        info "已关闭 ${svc} 开机自启"
+    fi
+done
 
-if systemctl is-enabled --quiet "${APP_NAME}" 2>/dev/null; then
-    systemctl disable "${APP_NAME}" 2>/dev/null || true
-    info "已关闭 ${APP_NAME} 开机自启"
-fi
-
-if [[ -f "${SYSTEMD_SERVICE_FILE}" ]]; then
-    rm -f "${SYSTEMD_SERVICE_FILE}"
-    info "已删除服务单元定义: ${SYSTEMD_SERVICE_FILE}"
-fi
+for sfile in "${SYSTEMD_SERVICE_FILE}" "${LEGACY_SERVICE_FILE}"; do
+    if [[ -f "${sfile}" ]]; then
+        rm -f "${sfile}"
+        info "已删除服务单元定义: ${sfile}"
+    fi
+done
 
 # 2. 清理开发服务 (如果存在或指定)
 if [[ "${CLEAN_DEV}" == "true" ]] || [[ -f "/etc/systemd/system/dae-webui-dev-api.service" ]]; then
@@ -155,34 +162,42 @@ systemctl reset-failed 2>/dev/null || true
 
 # 3. 移除可执行文件
 info "[3/4] 移除主程序文件..."
-if [[ -f "${INSTALL_BIN}" ]]; then
-    rm -f "${INSTALL_BIN}"
-    success "已移除主程序: ${INSTALL_BIN}"
-else
-    info "未检测到二进制文件: ${INSTALL_BIN}，跳过"
-fi
+for bfile in "${INSTALL_BIN}" "${LEGACY_BIN}"; do
+    if [[ -f "${bfile}" || -L "${bfile}" ]]; then
+        rm -f "${bfile}"
+        success "已移除主程序: ${bfile}"
+    fi
+done
 
 # 4. 数据清理决策
 info "[4/4] 配置文件与数据清理处理..."
 if [[ "${PURGE_DATA}" == "true" ]]; then
     warn "执行彻底清理 (--purge)..."
-    if [[ -d "${CONFIG_DIR}" ]]; then
-        rm -rf "${CONFIG_DIR}"
-        info "已清理配置目录: ${CONFIG_DIR}"
-    fi
-    if [[ -d "${LOG_BACKUP_DIR}" ]]; then
-        rm -rf "${LOG_BACKUP_DIR}"
-        info "已清理日志备份目录: ${LOG_BACKUP_DIR}"
-    fi
+    for d in "${CONFIG_DIR}" "${LEGACY_CONFIG_DIR}"; do
+        if [[ -d "${d}" ]]; then
+            rm -rf "${d}"
+            info "已清理配置目录: ${d}"
+        fi
+    done
+    for d in "${LOG_BACKUP_DIR}" "${LEGACY_LOG_DIR}"; do
+        if [[ -d "${d}" ]]; then
+            rm -rf "${d}"
+            info "已清理日志备份目录: ${d}"
+        fi
+    done
     success "已彻底清除所有配置及日志备份数据！"
 else
     info "数据已保留:"
     [[ -d "${CONFIG_DIR}" ]] && echo -e "  • 配置目录: ${CYAN}${CONFIG_DIR}${NC}"
+    [[ -d "${LEGACY_CONFIG_DIR}" ]] && echo -e "  • 旧版配置目录: ${CYAN}${LEGACY_CONFIG_DIR}${NC}"
     [[ -d "${LOG_BACKUP_DIR}" ]] && echo -e "  • 备份目录: ${CYAN}${LOG_BACKUP_DIR}${NC}"
     info "如需完全清理，可手动执行: rm -rf ${CONFIG_DIR} ${LOG_BACKUP_DIR}"
 fi
 
 echo ""
+echo -e "${GREEN}================================================================${NC}"
+echo -e "${GREEN}${BOLD}     🎉 daeX 卸载流程已成功完成！${NC}"
+echo -e "${GREEN}================================================================${NC}"
 echo -e "${GREEN}================================================================${NC}"
 echo -e "${GREEN}${BOLD}     🎉 dae-webui 卸载流程已成功完成！${NC}"
 echo -e "${GREEN}================================================================${NC}"

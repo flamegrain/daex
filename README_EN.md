@@ -2,7 +2,7 @@
   <img src="frontend/public/logo-128.png" width="96" height="96" alt="daeX Logo" />
 </p>
 
-<h1 align="center">daeX Console (dae-webui)</h1>
+<h1 align="center">daeX Console</h1>
 
 <p align="center">
   <b>Next-Generation Linux eBPF Transparent Proxy Console & Visual Gateway Panel</b>
@@ -80,7 +80,7 @@ Seamless integration with systemd daemon: live metrics (PID, Memory, CPU, Uptime
 - 🔀 **Visual Routing Engine**: Full drag-and-drop rule ordering, condition builders (domain, geosite, geoip, dip, dport, pname), and built-in ruleset templates.
 - 🌐 **Comprehensive Protocol Support**: Automatically extracts and normalizes outbound nodes from multi-protocol share links and provider subscriptions.
 - 📜 **Live Logs & Snapshots**: Colored real-time journalctl streaming (INFO/WARN/ERROR/DEBUG), keyword filtering, and downloadable log backups.
-- ⚙️ **Service Lifecycle Control**: Manage both `dae` and `dae-webui` services via systemd, inspect resource utilization, and trigger smooth configuration reloads.
+- ⚙️ **Service Lifecycle Control**: Manage both `dae` and `daex` services via systemd, inspect resource utilization, and trigger smooth configuration reloads.
 - 🩺 **Built-in System Doctor**: Command-line and WebUI diagnostics validating kernel eBPF support, BPF mount points, config syntax, and network paths.
 - 🌓 **Dual Themes & Full Bilingual**: Seamless dark/light theme toggle and 100% complete English and Simplified Chinese support.
 
@@ -107,8 +107,8 @@ curl -fsSL https://raw.githubusercontent.com/flamegrain/daex/main/install.sh | b
 ### 3. Install from Source Clone
 
 ```bash
-git clone https://github.com/flamegrain/daex.git /opt/dae-webui
-cd /opt/dae-webui
+git clone https://github.com/flamegrain/daex.git /opt/daex
+cd /opt/daex
 sudo ./install.sh install
 ```
 
@@ -129,11 +129,11 @@ sudo ./install.sh [command] [options]
 | `install` | Install binaries and register systemd service (default) |
 | `doctor` / `check` | Check system environment and eBPF readiness |
 | `update` | Check and pull latest release |
-| `restart` | Restart dae-webui service |
+| `restart` | Restart daex service |
 | `status` | View current service status and resource usage |
 | `logs` | Follow real-time systemd service logs |
-| `stop` | Stop dae-webui service |
-| `start` | Start dae-webui service |
+| `stop` | Stop daex service |
+| `start` | Start daex service |
 | `uninstall` | Safely uninstall service and binaries |
 
 ### Command Options
@@ -164,23 +164,23 @@ Once installed, navigate to the console in your browser:
 
 ## 🖥️ Systemd Service Management
 
-`dae-webui` is registered as a standard systemd service: `dae-webui.service`.
+`daex` is registered as a standard systemd service: `daex.service` (with `/usr/local/bin/dae-webui` compatibility symlink).
 
 ```bash
 # Check status
-systemctl status dae-webui
+systemctl status daex
 
 # Restart service
-systemctl restart dae-webui
+systemctl restart daex
 
 # Stop service
-systemctl stop dae-webui
+systemctl stop daex
 
 # Follow logs
-journalctl -u dae-webui -f
+journalctl -u daex -f
 
 # Enable on boot
-systemctl enable dae-webui
+systemctl enable daex
 ```
 
 ---
@@ -233,7 +233,7 @@ pnpm build
 
 # 2. Build Backend Binary
 cd ../backend
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(date +%Y%m%d-%H%M)" -o ../bin/dae-webui .
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(date +%Y%m%d-%H%M)" -o ../bin/daex .
 ```
 
 ---

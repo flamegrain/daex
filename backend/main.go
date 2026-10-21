@@ -367,7 +367,7 @@ func main() {
 	flag.Parse()
 
 	if showVersion {
-		fmt.Printf("dae-webui %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("daeX %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
 		return
 	}
 	if abs, err := filepath.Abs(o.DaeConfig); err == nil {
@@ -1209,7 +1209,7 @@ func main() {
 
 	srv := &http.Server{Addr: o.Listen, Handler: logRequests(mux), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
-		log.Printf("dae-webui %s listening on %s (dae=%s config=%s backup=%s)", version, o.Listen, o.DaeBin, o.DaeConfig, o.BackupDir)
+		log.Printf("daeX %s listening on %s (dae=%s config=%s backup=%s)", version, o.Listen, o.DaeBin, o.DaeConfig, o.BackupDir)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
 		}
@@ -1320,7 +1320,7 @@ func spaHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := fs.Stat(dist, "index.html"); err != nil {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			_, _ = w.Write([]byte("dae-webui backend is running. Frontend not embedded (dev mode: open Vite on :5173).\n"))
+			_, _ = w.Write([]byte("daeX backend is running. Frontend not embedded (dev mode: open Vite on :5173).\n"))
 			return
 		}
 		p := strings.TrimPrefix(r.URL.Path, "/")

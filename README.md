@@ -2,7 +2,7 @@
   <img src="frontend/public/logo-128.png" width="96" height="96" alt="daeX Logo" />
 </p>
 
-<h1 align="center">daeX 控制台 (dae-webui)</h1>
+<h1 align="center">daeX 控制台</h1>
 
 <p align="center">
   <b>新一代 Linux eBPF 透明代理控制台与现代化可视化网关面板</b>
@@ -113,8 +113,8 @@ curl -fsSL https://raw.githubusercontent.com/flamegrain/daex/main/install.sh | b
 如果你已将本项目代码克隆至服务器，可直接执行根目录下的自动化脚本：
 
 ```bash
-git clone https://github.com/flamegrain/daex.git /opt/dae-webui
-cd /opt/dae-webui
+git clone https://github.com/flamegrain/daex.git /opt/daex
+cd /opt/daex
 
 # 执行自动化安装与服务注册
 sudo ./install.sh install
@@ -137,11 +137,11 @@ sudo ./install.sh [命令] [选项]
 | `install` | 检查环境、安装程序并注册 systemd 服务（默认） |
 | `doctor` / `check` | 系统运行环境与健康自检（内核、eBPF、配置语法、服务等） |
 | `update` | 检查并拉取最新版本更新程序 |
-| `restart` | 重启 dae-webui 服务 |
-| `status` | 查看当前 dae-webui 服务运行状态与资源占用 |
-| `logs` | 实时跟踪查看 dae-webui 的 systemd 服务日志 |
-| `stop` | 停止 dae-webui 服务 |
-| `start` | 启动 dae-webui 服务 |
+| `restart` | 重启 daex 服务 |
+| `status` | 查看当前 daex 服务运行状态与资源占用 |
+| `logs` | 实时跟踪查看 daex 的 systemd 服务日志 |
+| `stop` | 停止 daex 服务 |
+| `start` | 启动 daex 服务 |
 | `uninstall` | 安全卸载服务并清理二进制文件（默认保留用户配置） |
 
 ### 选项说明
@@ -172,23 +172,23 @@ sudo ./install.sh [命令] [选项]
 
 ## 🖥️ systemd 系统服务常用管理
 
-dae-webui 默认注册为标准的 systemd 服务：`dae-webui.service`。
+daeX 默认注册为标准的 systemd 服务：`daex.service`（同时创建 `/usr/local/bin/dae-webui` 兼容软链接）。
 
 ```bash
 # 查看服务运行状态
-systemctl status dae-webui
+systemctl status daex
 
 # 重启 WebUI 服务
-systemctl restart dae-webui
+systemctl restart daex
 
 # 停止 WebUI 服务
-systemctl stop dae-webui
+systemctl stop daex
 
 # 查看实时运行日志 (Follow)
-journalctl -u dae-webui -f
+journalctl -u daex -f
 
 # 设置开机自启
-systemctl enable dae-webui
+systemctl enable daex
 ```
 
 ---
@@ -224,7 +224,7 @@ sudo ./install.sh doctor
 - ✅ **dae 核心主程序**（二进制执行权限与版本）
 - ✅ **dae 配置文件语法**（自动调用 `dae validate -c` 检测合法性）
 - ✅ **路由规则库资源**（检查 `geosite.dat` 与 `geoip.dat` 完整性）
-- ✅ **dae-webui 服务运行状态**（systemd 活跃度与 HTTP 端口监听）
+- ✅ **daeX 服务运行状态**（systemd 活跃度与 HTTP 端口监听）
 - ✅ **配置安全权限**（验证敏感配置文件权限是否符合 `0600`）
 
 ---
@@ -243,9 +243,9 @@ cd frontend
 pnpm install --frozen-lockfile
 pnpm build
 
-# 2. 编译后端并生成二进制 (输出到 bin/dae-webui)
+# 2. 编译后端并生成二进制 (输出到 bin/daex)
 cd ../backend
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(date +%Y%m%d-%H%M)" -o ../bin/dae-webui .
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(date +%Y%m%d-%H%M)" -o ../bin/daex .
 ```
 
 ---

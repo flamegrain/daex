@@ -106,7 +106,7 @@ func testSingleTarget(def ConnectivityTarget) ConnectivityTarget {
 	var statusCode int
 
 	if err == nil {
-		req.Header.Set("User-Agent", "Mozilla/5.0 dae-webui/connectivity-check")
+		req.Header.Set("User-Agent", "Mozilla/5.0 daex/connectivity-check")
 		client := &http.Client{
 			Timeout: 1500 * time.Millisecond,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {

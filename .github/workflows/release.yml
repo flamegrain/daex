@@ -51,17 +51,24 @@ jobs:
           mkdir -p release
           
           cd backend
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o ../release/dae-webui-linux-amd64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o ../release/dae-webui-linux-arm64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o ../release/daex-linux-amd64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o ../release/daex-linux-arm64 .
           cd ../release
+          rm -f sha256sums.txt
           
           for arch in amd64 arm64; do
-            bin_name="dae-webui-linux-${arch}"
-            tar_name="dae-webui-linux-${arch}.tar.gz"
-            cp "${bin_name}" dae-webui
-            tar -czf "${tar_name}" dae-webui
-            rm -f dae-webui
+            bin_name="daex-linux-${arch}"
+            tar_name="daex-linux-${arch}.tar.gz"
+            cp "${bin_name}" daex
+            tar -czf "${tar_name}" daex
+            rm -f daex
             sha256sum "${tar_name}" >> sha256sums.txt
+            sha256sum "${bin_name}" >> sha256sums.txt
+
+            # 同时生成兼容别名副本
+            cp "${tar_name}" "dae-webui-linux-${arch}.tar.gz"
+            cp "${bin_name}" "dae-webui-linux-${arch}"
+            sha256sum "dae-webui-linux-${arch}.tar.gz" >> sha256sums.txt
           done
 
       - name: Create or Update GitHub Release
@@ -73,6 +80,10 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
+            release/daex-linux-amd64.tar.gz
+            release/daex-linux-arm64.tar.gz
+            release/daex-linux-amd64
+            release/daex-linux-arm64
             release/dae-webui-linux-amd64.tar.gz
             release/dae-webui-linux-arm64.tar.gz
             release/dae-webui-linux-amd64

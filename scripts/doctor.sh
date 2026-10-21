@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# dae-webui 环境诊断与系统自检工具 (Doctor & Health Diagnostics)
+# daeX 环境诊断与系统自检工具 (Doctor & Health Diagnostics)
 # ==============================================================================
 
 set -e
 
-APP_NAME="dae-webui"
+APP_NAME="daex"
 DAE_BIN="/usr/local/bin/dae"
 DEFAULT_PORT="9091"
 
@@ -47,7 +47,7 @@ print_item() {
 
 echo ""
 echo -e "${CYAN}${BOLD}================================================================${NC}"
-echo -e "${CYAN}${BOLD}       🔍 dae-webui 系统运行环境诊断与健康自检报告${NC}"
+echo -e "${CYAN}${BOLD}       🔍 daeX 系统运行环境诊断与健康自检报告${NC}"
 echo -e "${CYAN}${BOLD}================================================================${NC}"
 echo ""
 
@@ -120,7 +120,7 @@ if systemctl list-unit-files dae.service &>/dev/null; then
 fi
 
 if [[ -z "${CONFIG_PATH}" || ! -f "${CONFIG_PATH}" ]]; then
-    for cand in "/usr/local/etc/dae/config.dae" "/etc/dae/config.dae" "/etc/dae-webui/config.dae" "/opt/dae-webui/config.mock.dae"; do
+    for cand in "/usr/local/etc/dae/config.dae" "/etc/dae/config.dae" "/etc/daex/config.dae" "/opt/daex/config.mock.dae" "/etc/dae-webui/config.dae" "/opt/dae-webui/config.mock.dae"; do
         if [[ -f "${cand}" ]]; then
             CONFIG_PATH="${cand}"
             break
@@ -181,24 +181,34 @@ else
     print_item "WARN" "geoip.dat" "未在标准目录检测到 geoip.dat，IP 分流规则库可能缺失"
 fi
 
-# 6. 检查 dae-webui 安装与健康状态
+# 6. 检查 daeX 安装与健康状态
 echo ""
-echo -e "${BOLD}6. dae-webui 控制台服务与端口状态:${NC}"
-if [[ -x "/usr/local/bin/dae-webui" ]]; then
-    WEBUI_VER=$(/usr/local/bin/dae-webui -version 2>&1 || echo "installed")
-    print_item "PASS" "dae-webui 主程序" "安装于 /usr/local/bin/dae-webui (${WEBUI_VER})"
+echo -e "${BOLD}6. daeX 控制台服务与端口状态:${NC}"
+FOUND_BIN=""
+if [[ -x "/usr/local/bin/daex" ]]; then
+    FOUND_BIN="/usr/local/bin/daex"
+elif [[ -x "/usr/local/bin/dae-webui" ]]; then
+    FOUND_BIN="/usr/local/bin/dae-webui"
+fi
+
+if [[ -n "${FOUND_BIN}" ]]; then
+    WEBUI_VER=$(${FOUND_BIN} -version 2>&1 || echo "installed")
+    print_item "PASS" "daeX 主程序" "安装于 ${FOUND_BIN} (${WEBUI_VER})"
 else
-    print_item "WARN" "dae-webui 主程序" "/usr/local/bin/dae-webui 未安装 (若使用 dev 服务可忽略)"
+    print_item "WARN" "daeX 主程序" "/usr/local/bin/daex 未安装 (若使用 dev 服务可忽略)"
 fi
 
 # systemd 服务状态
-if systemctl is-active --quiet dae-webui 2>/dev/null; then
+if systemctl is-active --quiet daex 2>/dev/null; then
+    WEBUI_PID=$(systemctl show daex --property=MainPID --value 2>/dev/null || echo "-")
+    print_item "PASS" "daex.service" "运行中 active (running), PID: ${WEBUI_PID}"
+elif systemctl is-active --quiet dae-webui 2>/dev/null; then
     WEBUI_PID=$(systemctl show dae-webui --property=MainPID --value 2>/dev/null || echo "-")
-    print_item "PASS" "dae-webui.service" "运行中 active (running), PID: ${WEBUI_PID}"
+    print_item "PASS" "dae-webui.service (旧版兼容)" "运行中 active (running), PID: ${WEBUI_PID}"
 elif systemctl is-active --quiet dae-webui-dev-api 2>/dev/null; then
-    print_item "PASS" "dae-webui (DEV)" "开发模式服务运行中 (dae-webui-dev-api active)"
+    print_item "PASS" "daeX (DEV)" "开发模式服务运行中 (dae-webui-dev-api active)"
 else
-    print_item "WARN" "dae-webui.service" "dae-webui 系统服务未运行"
+    print_item "WARN" "daex.service" "daex 系统服务未运行"
 fi
 
 # HTTP 健康检查探针
@@ -230,7 +240,8 @@ fi
 # 8. 磁盘与数据目录可写性
 echo ""
 echo -e "${BOLD}8. 数据存储与备份目录权限:${NC}"
-BACKUP_DIR="/var/log/dae-webui/backups"
+BACKUP_DIR="/var/log/daex/backups"
+[[ ! -d "${BACKUP_DIR}" && -d "/var/log/dae-webui/backups" ]] && BACKUP_DIR="/var/log/dae-webui/backups"
 mkdir -p "${BACKUP_DIR}" 2>/dev/null || true
 if [[ -w "${BACKUP_DIR}" ]]; then
     AVAIL_DISK=$(df -h "${BACKUP_DIR}" 2>/dev/null | tail -n 1 | awk '{print $4}')

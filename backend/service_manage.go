@@ -120,12 +120,19 @@ func detectWebuiServiceName() string {
 		if strings.Contains(s, "dae-webui-dev-api.service") {
 			return "dae-webui-dev-api"
 		}
+		if strings.Contains(s, "daex.service") {
+			return "daex"
+		}
 		if strings.Contains(s, "dae-webui.service") {
 			return "dae-webui"
 		}
 	}
 
-	out, err := exec.Command("systemctl", "is-active", "dae-webui").Output()
+	out, err := exec.Command("systemctl", "is-active", "daex").Output()
+	if err == nil && strings.TrimSpace(string(out)) == "active" {
+		return "daex"
+	}
+	out, err = exec.Command("systemctl", "is-active", "dae-webui").Output()
 	if err == nil && strings.TrimSpace(string(out)) == "active" {
 		return "dae-webui"
 	}
@@ -133,7 +140,7 @@ func detectWebuiServiceName() string {
 	if err == nil && strings.TrimSpace(string(out)) == "active" {
 		return "dae-webui-dev-api"
 	}
-	return "dae-webui"
+	return "daex"
 }
 
 func getDaeServiceDetail(ctx context.Context, o Options) ServiceDetail {
@@ -236,9 +243,16 @@ func getWebuiServiceDetail(ctx context.Context, o Options) ServiceDetail {
 
 	host, _ := os.Hostname()
 
+	binPath := "/usr/local/bin/daex"
+	if _, err := os.Stat(binPath); err != nil {
+		if _, err2 := os.Stat("/usr/local/bin/dae-webui"); err2 == nil {
+			binPath = "/usr/local/bin/dae-webui"
+		}
+	}
+
 	return ServiceDetail{
 		Name:                 webuiSvc,
-		DisplayName:          "dae-webui 控制台服务",
+		DisplayName:          "daeX 控制台服务",
 		Description:          "可视化网络流量管控大盘、策略节点调度、路由分流管理及诊断服务",
 		ActiveState:          activeState,
 		SubState:             subState,
@@ -251,7 +265,7 @@ func getWebuiServiceDetail(ctx context.Context, o Options) ServiceDetail {
 		MemoryFormatted:      formatBytesSize(mem),
 		CPUTimeSeconds:       cpuSec,
 		Version:              version,
-		BinPath:              "/usr/local/bin/dae-webui",
+		BinPath:              binPath,
 		ConfigPath:           o.DaeConfig,
 		ListenAddr:           o.Listen,
 		Extra: map[string]any{

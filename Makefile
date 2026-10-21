@@ -44,7 +44,7 @@ logs:
 	$(SSH) -t 'journalctl -f -n 50 -u dae-webui-dev-api -u dae-webui-dev-web'
 
 status:
-	@$(SSH) 'systemctl --no-pager -n 0 status dae-webui-dev-api dae-webui-dev-web dae-webui dae 2>/dev/null | grep -E "●|Active:"'
+	@$(SSH) 'systemctl --no-pager -n 0 status dae-webui-dev-api dae-webui-dev-web daex dae-webui dae 2>/dev/null | grep -E "●|Active:"'
 
 # 把 VM 上生成的 lockfile 拉回本地 (pnpm add 之后执行)
 pull-lock:
@@ -87,12 +87,13 @@ vm-dev-install:
 
 vm-build:
 	cd frontend && pnpm install --frozen-lockfile && pnpm build
-	cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$$(date +%Y%m%d-%H%M)" -o ../bin/dae-webui .
+	cd backend && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$$(date +%Y%m%d-%H%M)" -o ../bin/daex .
 
 vm-deploy:
-	install -m 755 bin/dae-webui /usr/local/bin/dae-webui
-	install -m 644 deploy/dae-webui.service /etc/systemd/system/
+	install -m 755 bin/daex /usr/local/bin/daex
+	ln -sf /usr/local/bin/daex /usr/local/bin/dae-webui
+	install -m 644 deploy/daex.service /etc/systemd/system/
 	systemctl daemon-reload
-	systemctl enable dae-webui
-	systemctl restart dae-webui
-	@sleep 1; systemctl --no-pager -n 5 status dae-webui | head -12
+	systemctl enable daex
+	systemctl restart daex
+	@sleep 1; systemctl --no-pager -n 5 status daex | head -12

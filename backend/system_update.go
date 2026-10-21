@@ -116,7 +116,7 @@ func fetchGitHubLatestRelease(ctx context.Context, repo string) (*GitHubRelease,
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "dae-webui-updater")
+	req.Header.Set("User-Agent", "daex-updater")
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
 	client := &http.Client{Timeout: 8 * time.Second}
@@ -262,7 +262,7 @@ func downloadFileToMemory(ctx context.Context, urlStr string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "dae-webui-updater")
+	req.Header.Set("User-Agent", "daex-updater")
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)

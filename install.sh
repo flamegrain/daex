@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# dae-webui 自动化安装与运维部署脚本
-# 项目主页: https://github.com/daeuniverse/dae
+# daeX 自动化安装与运维部署脚本
+# 项目主页: https://github.com/flamegrain/daex
 # 支持系统: Linux (systemd) | 架构: x86_64(amd64), aarch64(arm64)
 # ==============================================================================
 
 set -e
 
 # 常量定义
-APP_NAME="dae-webui"
-APP_DESC="dae Transparent Proxy WebUI Gateway"
+APP_NAME="daex"
+APP_DESC="daeX - dae Transparent Proxy WebUI Gateway"
 INSTALL_BIN_DIR="/usr/local/bin"
 TARGET_BIN="${INSTALL_BIN_DIR}/${APP_NAME}"
 SYSTEMD_SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
@@ -17,7 +17,7 @@ DEFAULT_PORT="9091"
 DEFAULT_HOST="0.0.0.0"
 DEFAULT_DAE_BIN="/usr/local/bin/dae"
 DEFAULT_DAE_SERVICE="dae"
-BACKUP_BASE_DIR="/var/log/dae-webui/backups"
+BACKUP_BASE_DIR="/var/log/daex/backups"
 GITHUB_REPO="flamegrain/daex"
 
 # 输出着色
@@ -61,11 +61,11 @@ check_root() {
 # 检查系统类型与 systemd
 check_environment() {
     if [[ "$(uname -s)" != "Linux" ]]; then
-        fatal "dae-webui 仅支持 Linux 操作系统！"
+        fatal "daeX 仅支持 Linux 操作系统！"
     fi
 
     if ! command -v systemctl &>/dev/null; then
-        fatal "系统未检测到 systemd (systemctl)，dae-webui 依赖 systemd 进行服务托管与守护！"
+        fatal "系统未检测到 systemd (systemctl)，daeX 依赖 systemd 进行服务托管与守护！"
     fi
 }
 
@@ -109,8 +109,10 @@ detect_dae_config() {
         local candidates=(
             "/usr/local/etc/dae/config.dae"
             "/etc/dae/config.dae"
-            "/opt/dae-webui/config.mock.dae"
+            "/etc/daex/config.dae"
+            "/opt/daex/config.mock.dae"
             "/etc/dae-webui/config.dae"
+            "/opt/dae-webui/config.mock.dae"
         )
         for cand in "${candidates[@]}"; do
             if [[ -f "${cand}" ]]; then
@@ -122,7 +124,7 @@ detect_dae_config() {
 
     # 3. 如果还是没有，设置默认配置创建路径
     if [[ -z "${detected_cfg}" ]]; then
-        detected_cfg="/etc/dae-webui/config.dae"
+        detected_cfg="/etc/daex/config.dae"
     fi
 
     DETECTED_CONFIG="${detected_cfg}"
@@ -183,21 +185,20 @@ get_local_ip() {
 
 # 安装可执行文件
 install_binary() {
-    info "准备安装 dae-webui 主程序..."
+    info "准备安装 daeX 主程序..."
 
-    # 1. 优先检查当前运行目录是否已有编译好的 bin/dae-webui
+    # 1. 优先检查当前运行目录是否已有编译好的 bin/daex 或 dae-webui
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-    if [[ -f "${script_dir}/bin/dae-webui" ]]; then
-        info "使用当前源码目录已编译的二进制: ${script_dir}/bin/dae-webui"
-        install -m 755 "${script_dir}/bin/dae-webui" "${TARGET_BIN}"
-        return 0
-    elif [[ -f "${script_dir}/dae-webui" ]]; then
-        info "使用当前目录中的二进制: ${script_dir}/dae-webui"
-        install -m 755 "${script_dir}/dae-webui" "${TARGET_BIN}"
-        return 0
-    fi
+    for candidate in "${script_dir}/bin/daex" "${script_dir}/daex" "${script_dir}/bin/dae-webui" "${script_dir}/dae-webui"; do
+        if [[ -f "${candidate}" ]]; then
+            info "使用当前源码目录已编译的二进制: ${candidate}"
+            install -m 755 "${candidate}" "${TARGET_BIN}"
+            ln -sf "${TARGET_BIN}" "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
+            return 0
+        fi
+    done
 
     # 2. 如果处于完整源码仓库且具备 Go 与 Node 环境，支持就地编译
     if [[ -f "${script_dir}/backend/main.go" && -f "${script_dir}/frontend/package.json" ]]; then
@@ -205,9 +206,10 @@ install_binary() {
             info "检测到源码目录及构建工具链，正在进行就地编译..."
             (
                 cd "${script_dir}/frontend" && pnpm install --frozen-lockfile && pnpm build
-                cd "${script_dir}/backend" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(date +%Y%m%d-%H%M)" -o "${script_dir}/bin/dae-webui" .
+                cd "${script_dir}/backend" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(date +%Y%m%d-%H%M)" -o "${script_dir}/bin/daex" .
             )
-            install -m 755 "${script_dir}/bin/dae-webui" "${TARGET_BIN}"
+            install -m 755 "${script_dir}/bin/daex" "${TARGET_BIN}"
+            ln -sf "${TARGET_BIN}" "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
             success "编译并安装完成: ${TARGET_BIN}"
             return 0
         fi
@@ -216,27 +218,41 @@ install_binary() {
     # 3. 若无本地二进制，则尝试从 GitHub Releases 下载预编译单文件包
     info "尝试从 GitHub 下载发布包 (${ARCH})..."
     local release_tag="${SPECIFIED_VERSION:-latest}"
-    local download_url=""
     local tmp_dir
     tmp_dir="$(mktemp -d)"
 
+    # 优先下载 daex 发行包，若旧版本不存在则回退尝试 dae-webui 发行包
+    local download_urls=()
     if [[ "${release_tag}" == "latest" ]]; then
-        download_url="https://github.com/${GITHUB_REPO}/releases/latest/download/dae-webui-linux-${ARCH}.tar.gz"
+        download_urls+=(
+            "https://github.com/${GITHUB_REPO}/releases/latest/download/daex-linux-${ARCH}.tar.gz"
+            "https://github.com/${GITHUB_REPO}/releases/latest/download/dae-webui-linux-${ARCH}.tar.gz"
+        )
     else
-        download_url="https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/dae-webui-linux-${ARCH}.tar.gz"
+        download_urls+=(
+            "https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/daex-linux-${ARCH}.tar.gz"
+            "https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/dae-webui-linux-${ARCH}.tar.gz"
+        )
     fi
 
-    info "下载地址: ${download_url}"
-    if curl -fL --progress-bar "${download_url}" -o "${tmp_dir}/dae-webui.tar.gz" 2>/dev/null || wget -q --show-progress "${download_url}" -O "${tmp_dir}/dae-webui.tar.gz" 2>/dev/null; then
-        tar -zxf "${tmp_dir}/dae-webui.tar.gz" -C "${tmp_dir}"
-        install -m 755 "${tmp_dir}/dae-webui" "${TARGET_BIN}"
-        rm -rf "${tmp_dir}"
-        success "预编译二进制已安装至: ${TARGET_BIN}"
-        return 0
-    fi
+    for download_url in "${download_urls[@]}"; do
+        info "下载地址: ${download_url}"
+        if curl -fL --progress-bar "${download_url}" -o "${tmp_dir}/archive.tar.gz" 2>/dev/null || wget -q --show-progress "${download_url}" -O "${tmp_dir}/archive.tar.gz" 2>/dev/null; then
+            tar -zxf "${tmp_dir}/archive.tar.gz" -C "${tmp_dir}"
+            if [[ -f "${tmp_dir}/daex" ]]; then
+                install -m 755 "${tmp_dir}/daex" "${TARGET_BIN}"
+            elif [[ -f "${tmp_dir}/dae-webui" ]]; then
+                install -m 755 "${tmp_dir}/dae-webui" "${TARGET_BIN}"
+            fi
+            ln -sf "${TARGET_BIN}" "${INSTALL_BIN_DIR}/dae-webui" 2>/dev/null || true
+            rm -rf "${tmp_dir}"
+            success "预编译二进制已安装至: ${TARGET_BIN} (兼容别名: ${INSTALL_BIN_DIR}/dae-webui)"
+            return 0
+        fi
+    done
 
     rm -rf "${tmp_dir}"
-    fatal "无法获取或编译 dae-webui 二进制，请检查网络或在源码目录中先运行 'make deploy'！"
+    fatal "无法获取或编译 daeX 二进制，请检查网络或在源码目录中先运行 'make deploy'！"
 }
 
 # 配置 systemd 服务文件
@@ -245,6 +261,13 @@ configure_service() {
     local cfg_path="${CUSTOM_CONFIG:-$DETECTED_CONFIG}"
     local dae_bin="${CUSTOM_DAE_BIN:-$DEFAULT_DAE_BIN}"
     local dae_service="${CUSTOM_DAE_SERVICE:-$DEFAULT_DAE_SERVICE}"
+
+    # 若系统存在旧版 dae-webui.service，平滑停止并停用以防止端口冲突
+    if systemctl is-active --quiet dae-webui 2>/dev/null; then
+        info "检测到运行中的旧版 dae-webui 服务，正在停止以切换至 daex 服务..."
+        systemctl stop dae-webui 2>/dev/null || true
+        systemctl disable dae-webui 2>/dev/null || true
+    fi
 
     # 检查若配置文件不存在则初始化
     if [[ ! -f "${cfg_path}" ]]; then
@@ -318,7 +341,7 @@ show_welcome_banner() {
 
     echo ""
     echo -e "${GREEN}================================================================${NC}"
-    echo -e "${GREEN}${BOLD}     🎉 恭喜！dae-webui 自动化安装与部署已圆满成功！${NC}"
+    echo -e "${GREEN}${BOLD}     🎉 恭喜！daeX 自动化安装与部署已圆满成功！${NC}"
     echo -e "${GREEN}================================================================${NC}"
     echo ""
     echo -e "  🌐 ${BOLD}控制台访问地址${NC} : ${CYAN}http://${host_ip}:${port}${NC}"
@@ -370,16 +393,16 @@ do_uninstall() {
 # 打印帮助信息
 show_help() {
     cat <<EOF
-dae-webui 自动化安装与运维部署脚本
+daeX 自动化安装与运维部署脚本
 
 用法:
   $0 [命令] [选项]
 
 命令:
-  install       安装并配置 dae-webui（默认命令）
+  install       安装并配置 daeX（默认命令）
   update        在线拉取或就地重新编译升级
   doctor, check 执行环境自检与健康诊断报告
-  uninstall     卸载 dae-webui 服务及二进制 (可接 --purge)
+  uninstall     卸载 daeX 服务及二进制 (可接 --purge)
   start         启动服务
   stop          停止服务
   restart       重启服务
@@ -497,7 +520,7 @@ case "${COMMAND}" in
         detect_dae_config
 
         echo ""
-        echo -e "${CYAN}${BOLD}>>> 开始执行 dae-webui 自动化安装与部署 <<<${NC}"
+        echo -e "${CYAN}${BOLD}>>> 开始执行 daeX 自动化安装与部署 <<<${NC}"
         info "目标可执行文件: ${TARGET_BIN}"
         info "自动匹配配置文件: ${CUSTOM_CONFIG:-$DETECTED_CONFIG}"
         info "监听端口: ${CUSTOM_PORT:-$DEFAULT_PORT}"
