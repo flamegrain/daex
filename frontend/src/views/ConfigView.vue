@@ -214,8 +214,8 @@ const fileInput = ref<HTMLInputElement | null>(null)
 
 // Config profile management
 const configProfiles = ref<ConfigProfile[]>([])
-const currentSelectedConfig = ref<string>('config.mock.dae')
-const activeRunningConfig = ref<string>('config.mock.dae')
+const currentSelectedConfig = ref<string>('config.dae')
+const activeRunningConfig = ref<string>('config.dae')
 const showNewProfileModal = ref(false)
 const newProfileName = ref('')
 const newProfileNote = ref('')
@@ -711,7 +711,7 @@ async function fetchConfigProfiles() {
     if (res.ok) {
       const data = await res.json()
       configProfiles.value = data.configs || []
-      activeRunningConfig.value = data.currentActive || 'config.mock.dae'
+      activeRunningConfig.value = data.currentActive || 'config.dae'
     }
   } catch (e) {
     console.error('Fetch config profiles failed:', e)

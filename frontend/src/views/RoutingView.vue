@@ -82,8 +82,8 @@ const loading = ref(false)
 const saving = ref(false)
 const isDirty = ref(false)
 const activatingConfig = ref(false)
-const currentSelectedConfig = ref<string>('config.mock.dae')
-const activeRunningConfig = ref<string>('config.mock.dae')
+const currentSelectedConfig = ref<string>('config.dae')
+const activeRunningConfig = ref<string>('config.dae')
 const configProfiles = ref<ConfigProfile[]>([])
 const configModel = ref<DaeConfigModel>({
   globals: {},
@@ -188,7 +188,7 @@ async function fetchConfigProfiles() {
     if (res.ok) {
       const data = await res.json()
       configProfiles.value = data.configs || data.profiles || []
-      activeRunningConfig.value = data.currentActive || data.activeName || 'config.mock.dae'
+      activeRunningConfig.value = data.currentActive || data.activeName || 'config.dae'
       if (!currentSelectedConfig.value && configProfiles.value.length > 0) {
         currentSelectedConfig.value = activeRunningConfig.value || configProfiles.value[0].name
       }

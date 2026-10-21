@@ -76,7 +76,7 @@ const pingingAll = ref(false)
 const pingingKeys = ref<Set<string>>(new Set())
 
 const overview = ref<NodesOverviewResponse>({
-  activeProfile: 'config.mock.dae',
+  activeProfile: 'config.dae',
   nodes: [],
   groups: [],
   subscriptions: [],

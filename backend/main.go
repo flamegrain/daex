@@ -370,13 +370,17 @@ func main() {
 		fmt.Printf("daeX %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
 		return
 	}
-	if abs, err := filepath.Abs(o.DaeConfig); err == nil {
-		o.DaeConfig = abs
+	resolvedConfig, isMock, allowSystem, err := resolveDaeConfig(o.DaeConfig, allowSystemConfig)
+	if err != nil {
+		log.Fatalf("配置路径解析错误: %v", err)
 	}
+	o.DaeConfig = resolvedConfig
+	allowSystemConfig = allowSystem
 
 	if err := checkConfigPath(o.DaeConfig, allowSystemConfig); err != nil {
 		log.Fatalf("refusing to start: %v", err)
 	}
+	_ = isMock
 
 	if o.BackupDir == "" {
 		cfgDir := filepath.Dir(o.DaeConfig)
@@ -444,8 +448,10 @@ func main() {
 			return countryList[i].Count > countryList[j].Count
 		})
 
+		isMock := strings.Contains(strings.ToLower(filepath.Base(o.DaeConfig)), "mock")
 		writeJSON(w, http.StatusOK, map[string]any{
 			"dae":      daeStatus(r.Context(), o),
+			"isMock":   isMock,
 			"current":  current,
 			"history":  hist,
 			"nodes":    nodes,
@@ -1297,7 +1303,13 @@ func listBackups(backupDir string) ([]BackupItem, error) {
 func daeStatus(ctx context.Context, o Options) map[string]any {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	res := map[string]any{"service": o.DaeService, "config": o.DaeConfig}
+	isMock := strings.Contains(strings.ToLower(filepath.Base(o.DaeConfig)), "mock")
+	res := map[string]any{
+		"service":    o.DaeService,
+		"config":     o.DaeConfig,
+		"configPath": o.DaeConfig,
+		"isMock":     isMock,
+	}
 
 	if out, err := exec.CommandContext(ctx, o.DaeBin, "--version").Output(); err == nil {
 		res["version"] = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
@@ -1351,9 +1363,58 @@ func logRequests(next http.Handler) http.Handler {
 
 const systemConfigDir = "/usr/local/etc/dae"
 
+func resolveDaeConfig(inputPath string, allowSystem bool) (string, bool, bool, error) {
+	if inputPath != "" && inputPath != "auto" {
+		abs, err := filepath.Abs(inputPath)
+		if err != nil {
+			return "", false, allowSystem, err
+		}
+		isMock := strings.Contains(strings.ToLower(filepath.Base(abs)), "mock")
+		if !isMock && !allowSystem && (abs == systemConfigDir || strings.HasPrefix(abs, systemConfigDir+"/")) {
+			allowSystem = true
+		}
+		return abs, isMock, allowSystem, nil
+	}
+
+	// 1. 优先自动探测生产环境真实有效的 dae 配置文件
+	realCandidates := []string{
+		"/usr/local/etc/dae/config.dae",
+		"/etc/dae/config.dae",
+		"/etc/daex/config.dae",
+	}
+	for _, c := range realCandidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			log.Printf("自动探测并挂载系统生产真实配置文件: %s", c)
+			return c, false, true, nil
+		}
+	}
+
+	// 2. 只有探测 dae 没有真实配置文件时，才回退挂载 mock 测试沙箱数据并标识
+	mockCandidates := []string{
+		"config.mock.dae",
+		"../config.mock.dae",
+		"/opt/daex/config.mock.dae",
+		"/opt/dae-webui/config.mock.dae",
+	}
+	for _, mc := range mockCandidates {
+		if fi, err := os.Stat(mc); err == nil && !fi.IsDir() {
+			abs, _ := filepath.Abs(mc)
+			log.Printf("未探测到系统生产配置文件，回退挂载测试沙箱配置 (Mock): %s", abs)
+			return abs, true, allowSystem, nil
+		}
+	}
+
+	// 3. 默认初始化空白真实配置
+	defaultCfg := "/etc/daex/config.dae"
+	_ = os.MkdirAll("/etc/daex", 0755)
+	_ = os.WriteFile(defaultCfg, []byte(defaultBlankDaeConfig), 0600)
+	log.Printf("未检测到真实或 Mock 配置文件，已初始化默认配置: %s", defaultCfg)
+	return defaultCfg, false, true, nil
+}
+
 func checkConfigPath(p string, allowSystem bool) error {
 	if p == "" {
-		return errors.New("-dae-config is required (use config.mock.dae for development)")
+		return errors.New("dae 配置文件路径未指定")
 	}
 	abs, err := filepath.Abs(p)
 	if err != nil {
@@ -1362,8 +1423,9 @@ func checkConfigPath(p string, allowSystem bool) error {
 	if real, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = real
 	}
-	if !allowSystem && (abs == systemConfigDir || strings.HasPrefix(abs, systemConfigDir+"/")) {
-		return fmt.Errorf("%s is the system dae config; dev/test must use config.mock.dae", abs)
+	isMock := strings.Contains(strings.ToLower(filepath.Base(abs)), "mock")
+	if !isMock && !allowSystem && (abs == systemConfigDir || strings.HasPrefix(abs, systemConfigDir+"/")) {
+		return fmt.Errorf("%s 为系统生产配置文件，请确认配置", abs)
 	}
 	return nil
 }

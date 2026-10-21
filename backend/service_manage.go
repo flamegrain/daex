@@ -276,6 +276,7 @@ func getWebuiServiceDetail(ctx context.Context, o Options) ServiceDetail {
 			"numGoroutine": runtime.NumGoroutine(),
 			"memAlloc":     formatBytesSize(m.Alloc),
 			"sysMem":       formatBytesSize(m.Sys),
+			"isMock":       strings.Contains(strings.ToLower(filepath.Base(o.DaeConfig)), "mock"),
 		},
 	}
 }

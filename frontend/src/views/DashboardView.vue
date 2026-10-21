@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import {
   Activity,
   ArrowUpRight,
@@ -123,6 +123,17 @@ const connectivityList = ref<ConnectivityItem[]>([
 
 const testingTargets = ref<Record<string, boolean>>({})
 const testingAll = ref(false)
+
+const isMock = computed(() => {
+  if (dashboardData.value?.isMock !== undefined) {
+    return Boolean(dashboardData.value.isMock)
+  }
+  if (dashboardData.value?.dae?.isMock !== undefined) {
+    return Boolean(dashboardData.value.dae.isMock)
+  }
+  const cfg = dashboardData.value?.dae?.config || ''
+  return cfg.toLowerCase().includes('mock')
+})
 
 function formatBps(bytesPerSec: number) {
   if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s'
@@ -578,7 +589,8 @@ onUnmounted(() => {
           <Layers class="h-icon" :size="16" />
           <span>{{ t('dashboard.nodes_table_title') }}</span>
         </div>
-        <span class="badge-mock">{{ t('dashboard.mock_badge') }}</span>
+        <span v-if="isMock" class="badge-mock">{{ t('dashboard.mock_badge') }}</span>
+        <span v-else class="badge-prod">{{ t('dashboard.prod_badge') }}</span>
       </div>
 
       <div class="table-wrapper">
@@ -1160,6 +1172,16 @@ onUnmounted(() => {
   background: var(--bg-input, #090d16);
   padding: 2px 8px;
   border-radius: 4px;
+}
+
+.badge-prod {
+  font-size: 11px;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 .table-wrapper {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import {
   Home,
   FileText,
@@ -47,6 +47,14 @@ if (typeof window !== 'undefined') {
 const daeStatus = ref<Record<string, any> | null>(null)
 const backendHealth = ref<Record<string, any> | null>(null)
 const loadingStatus = ref(false)
+
+const isMock = computed(() => {
+  if (daeStatus.value?.isMock !== undefined) {
+    return Boolean(daeStatus.value.isMock)
+  }
+  const cfg = daeStatus.value?.config || ''
+  return cfg.toLowerCase().includes('mock')
+})
 
 async function refreshDaeStatus() {
   loadingStatus.value = true
@@ -116,7 +124,7 @@ onMounted(() => {
         >
           <FileText class="nav-icon" :size="18" />
           <span>{{ t('nav.config') }}</span>
-          <span class="badge">mock</span>
+          <span v-if="isMock" class="badge">mock</span>
         </button>
 
         <button
@@ -199,7 +207,9 @@ onMounted(() => {
             </div>
             <div class="meta-row">
               <span>{{ t('status.env') }}:</span>
-              <span class="mock-tag">{{ t('status.env.mock') }}</span>
+              <span :class="isMock ? 'mock-tag' : 'prod-tag'">
+                {{ isMock ? t('status.env.mock') : t('status.env.prod') }}
+              </span>
             </div>
           </div>
 
@@ -486,6 +496,11 @@ html, body {
 .mock-tag {
   color: #38bdf8;
   font-weight: 500;
+}
+
+.prod-tag {
+  color: #10b981;
+  font-weight: 600;
 }
 
 .refresh-btn {

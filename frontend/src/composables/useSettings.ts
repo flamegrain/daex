@@ -112,6 +112,7 @@ const messages: Record<LangType, Record<string, string>> = {
     'status.version': '版本',
     'status.env': '环境',
     'status.env.mock': '安全假数据',
+    'status.env.prod': '真实配置',
     'status.refresh': '刷新运行状态',
     'status.refreshing': '正在检查...',
 
@@ -143,6 +144,7 @@ const messages: Record<LangType, Record<string, string>> = {
     'dashboard.conn_unlock': '原生解锁',
     'dashboard.nodes_table_title': '生效与可用节点详细列表',
     'dashboard.mock_badge': '沙箱假数据安全展示',
+    'dashboard.prod_badge': '实时生产数据',
     'dashboard.col_status': '状态',
     'dashboard.col_region': '国家/地区',
     'dashboard.col_name': '节点名称',
@@ -1185,6 +1187,7 @@ const messages: Record<LangType, Record<string, string>> = {
     'status.version': 'Version',
     'status.env': 'Environment',
     'status.env.mock': 'Mock Sandbox',
+    'status.env.prod': 'Live Config',
     'status.refresh': 'Refresh Status',
     'status.refreshing': 'Checking...',
 
@@ -1216,6 +1219,7 @@ const messages: Record<LangType, Record<string, string>> = {
     'dashboard.conn_unlock': 'Unlocked',
     'dashboard.nodes_table_title': 'Active & Available Nodes',
     'dashboard.mock_badge': 'Sandbox Mock Data',
+    'dashboard.prod_badge': 'Live Production',
     'dashboard.col_status': 'Status',
     'dashboard.col_region': 'Country/Region',
     'dashboard.col_name': 'Node Name',
