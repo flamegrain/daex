@@ -120,7 +120,7 @@ if systemctl list-unit-files dae.service &>/dev/null; then
 fi
 
 if [[ -z "${CONFIG_PATH}" || ! -f "${CONFIG_PATH}" ]]; then
-    for cand in "/usr/local/etc/dae/config.dae" "/etc/dae/config.dae" "/etc/daex/config.dae" "/opt/daex/config.mock.dae" "/etc/dae-webui/config.dae" "/opt/dae-webui/config.mock.dae"; do
+    for cand in "/usr/local/etc/dae/config.dae" "/etc/dae/config.dae" "/etc/daex/config.dae" "/opt/daex/config.mock.dae" "/etc/dae-webui/config.dae"; do
         if [[ -f "${cand}" ]]; then
             CONFIG_PATH="${cand}"
             break

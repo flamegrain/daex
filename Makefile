@@ -1,4 +1,4 @@
-# dae-webui — 本地编辑，VM (192.168.3.10) 上运行/调试/发布
+# daeX — 本地编辑，VM (192.168.3.10) 上运行/调试/发布
 #
 # 本地 (macOS) 常用:
 #   make dev-setup   首次: 同步代码 + 安装依赖 + 安装并启动 dev systemd 服务
@@ -6,17 +6,17 @@
 #   make sync        手动同步一次
 #   make logs        跟踪 dev 服务日志
 #   make status      查看 dev / dae 服务状态
-#   make deploy      构建并发布生产版 (systemd: dae-webui, :9091)
+#   make deploy      构建并发布生产版 (systemd: daex, :9091)
 #   make ssh         SSH 到 VM 项目目录
 #
 # vm-* 目标在 VM 上执行 (由上面的目标通过 ssh 调用)。
 
 VM          ?= root@192.168.3.10
-REMOTE      ?= /opt/dae-webui
-SSH_OPTS    ?= -o ControlMaster=auto -o ControlPath=/tmp/dae-webui-ssh-%C -o ControlPersist=10m
+REMOTE      ?= /opt/daex
+SSH_OPTS    ?= -o ControlMaster=auto -o ControlPath=/tmp/daex-ssh-%C -o ControlPersist=10m
 SSH         := ssh $(SSH_OPTS) $(VM)
 RSYNC_FLAGS ?= -rlptz
-VM_ENV      := . /etc/profile.d/dae-webui-dev.sh;
+VM_ENV      := . /etc/profile.d/daex-dev.sh 2>/dev/null || . /etc/profile.d/dae-webui-dev.sh 2>/dev/null;
 
 RSYNC_EXCLUDES := --exclude .git/ --exclude node_modules/ --exclude backend/tmp/ --exclude bin/ \
                   --exclude backend/internal/webui/dist/ --exclude '*.log' --exclude .DS_Store
@@ -35,16 +35,16 @@ dev-setup: sync
 	$(SSH) '$(VM_ENV) cd $(REMOTE) && make vm-deps vm-dev-install'
 
 dev-restart: sync
-	$(SSH) 'systemctl restart dae-webui-dev-api dae-webui-dev-web'
+	$(SSH) 'systemctl restart daex-dev-api daex-dev-web'
 
 dev-stop:
-	$(SSH) 'systemctl stop dae-webui-dev-api dae-webui-dev-web'
+	$(SSH) 'systemctl stop daex-dev-api daex-dev-web'
 
 logs:
-	$(SSH) -t 'journalctl -f -n 50 -u dae-webui-dev-api -u dae-webui-dev-web'
+	$(SSH) -t 'journalctl -f -n 50 -u daex-dev-api -u daex-dev-web'
 
 status:
-	@$(SSH) 'systemctl --no-pager -n 0 status dae-webui-dev-api dae-webui-dev-web daex dae-webui dae 2>/dev/null | grep -E "●|Active:"'
+	@$(SSH) 'systemctl --no-pager -n 0 status daex-dev-api daex-dev-web daex dae 2>/dev/null | grep -E "●|Active:"'
 
 # 把 VM 上生成的 lockfile 拉回本地 (pnpm add 之后执行)
 pull-lock:

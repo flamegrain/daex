@@ -117,11 +117,14 @@ func detectWebuiServiceName() string {
 	b, err := os.ReadFile("/proc/self/cgroup")
 	if err == nil {
 		s := string(b)
-		if strings.Contains(s, "dae-webui-dev-api.service") {
-			return "dae-webui-dev-api"
-		}
 		if strings.Contains(s, "daex.service") {
 			return "daex"
+		}
+		if strings.Contains(s, "daex-dev-api.service") {
+			return "daex-dev-api"
+		}
+		if strings.Contains(s, "dae-webui-dev-api.service") {
+			return "dae-webui-dev-api"
 		}
 		if strings.Contains(s, "dae-webui.service") {
 			return "dae-webui"
@@ -131,6 +134,10 @@ func detectWebuiServiceName() string {
 	out, err := exec.Command("systemctl", "is-active", "daex").Output()
 	if err == nil && strings.TrimSpace(string(out)) == "active" {
 		return "daex"
+	}
+	out, err = exec.Command("systemctl", "is-active", "daex-dev-api").Output()
+	if err == nil && strings.TrimSpace(string(out)) == "active" {
+		return "daex-dev-api"
 	}
 	out, err = exec.Command("systemctl", "is-active", "dae-webui").Output()
 	if err == nil && strings.TrimSpace(string(out)) == "active" {

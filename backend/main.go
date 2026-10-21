@@ -1394,7 +1394,6 @@ func resolveDaeConfig(inputPath string, allowSystem bool) (string, bool, bool, e
 		"config.mock.dae",
 		"../config.mock.dae",
 		"/opt/daex/config.mock.dae",
-		"/opt/dae-webui/config.mock.dae",
 	}
 	for _, mc := range mockCandidates {
 		if fi, err := os.Stat(mc); err == nil && !fi.IsDir() {
