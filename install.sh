@@ -225,15 +225,34 @@ install_binary() {
     local tmp_dir
     tmp_dir="$(mktemp -d)"
 
-    local download_url=""
+    local download_urls=()
     if [[ "${release_tag}" == "latest" ]]; then
-        download_url="https://github.com/${GITHUB_REPO}/releases/latest/download/daex-linux-${ARCH}.tar.gz"
+        download_urls+=(
+            "https://github.com/${GITHUB_REPO}/releases/latest/download/daex-linux-${ARCH}.tar.gz"
+            "https://ghfast.top/https://github.com/${GITHUB_REPO}/releases/latest/download/daex-linux-${ARCH}.tar.gz"
+            "https://mirror.ghproxy.com/https://github.com/${GITHUB_REPO}/releases/latest/download/daex-linux-${ARCH}.tar.gz"
+        )
     else
-        download_url="https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/daex-linux-${ARCH}.tar.gz"
+        download_urls+=(
+            "https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/daex-linux-${ARCH}.tar.gz"
+            "https://ghfast.top/https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/daex-linux-${ARCH}.tar.gz"
+            "https://mirror.ghproxy.com/https://github.com/${GITHUB_REPO}/releases/download/${release_tag}/daex-linux-${ARCH}.tar.gz"
+        )
     fi
 
-    info "下载地址: ${download_url}"
-    if curl -fL --progress-bar "${download_url}" -o "${tmp_dir}/archive.tar.gz" 2>/dev/null || wget -q --show-progress "${download_url}" -O "${tmp_dir}/archive.tar.gz" 2>/dev/null; then
+    local downloaded=false
+    for download_url in "${download_urls[@]}"; do
+        info "正在下载: ${download_url}"
+        if curl -fL --connect-timeout 10 --max-time 120 --progress-bar "${download_url}" -o "${tmp_dir}/archive.tar.gz" 2>/dev/null || wget -q -T 120 --show-progress "${download_url}" -O "${tmp_dir}/archive.tar.gz" 2>/dev/null; then
+            if [[ -s "${tmp_dir}/archive.tar.gz" ]] && tar -ztf "${tmp_dir}/archive.tar.gz" &>/dev/null; then
+                downloaded=true
+                break
+            fi
+        fi
+        warn "当前地址下载超时或不完整，正在尝试备用镜像源..."
+    done
+
+    if [[ "${downloaded}" == "true" ]]; then
         tar -zxf "${tmp_dir}/archive.tar.gz" -C "${tmp_dir}"
         if [[ -f "${tmp_dir}/daex" ]]; then
             install -m 755 "${tmp_dir}/daex" "${TARGET_BIN}"
