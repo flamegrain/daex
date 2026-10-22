@@ -137,7 +137,7 @@ func fetchGitHubLatestRelease(ctx context.Context, repo string) (*GitHubRelease,
 	return &rel, nil
 }
 
-func getLocalRuleFileInfo(name string) (path string, sizeBytes int64, modTime string) {
+func getLocalRuleFileInfo(name string) (path string, sizeBytes int64, modTime string, modTimeRaw time.Time) {
 	// Check standard search paths
 	candidates := []string{
 		filepath.Join("/usr/local/share/dae", name),
@@ -146,10 +146,10 @@ func getLocalRuleFileInfo(name string) (path string, sizeBytes int64, modTime st
 	}
 	for _, c := range candidates {
 		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
-			return c, fi.Size(), fi.ModTime().Format("2006-01-02 15:04:05")
+			return c, fi.Size(), fi.ModTime().Format("2006-01-02 15:04:05"), fi.ModTime()
 		}
 	}
-	return "/usr/local/share/dae/" + name, 0, "-"
+	return "/usr/local/share/dae/" + name, 0, "-", time.Time{}
 }
 
 func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewResponse, error) {
@@ -207,7 +207,7 @@ func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewRespon
 	// 2. Fetch rules release (Loyalsoldier/v2ray-rules-dat)
 	rulesMap := make(map[string]RuleFileInfo)
 
-	geoipPath, geoipSize, geoipMod := getLocalRuleFileInfo("geoip.dat")
+	geoipPath, geoipSize, geoipMod, geoipModRaw := getLocalRuleFileInfo("geoip.dat")
 	rulesMap["geoip"] = RuleFileInfo{
 		Name:      "geoip.dat",
 		Path:      geoipPath,
@@ -216,7 +216,7 @@ func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewRespon
 		ModTime:   geoipMod,
 	}
 
-	geositePath, geositeSize, geositeMod := getLocalRuleFileInfo("geosite.dat")
+	geositePath, geositeSize, geositeMod, geositeModRaw := getLocalRuleFileInfo("geosite.dat")
 	rulesMap["geosite"] = RuleFileInfo{
 		Name:      "geosite.dat",
 		Path:      geositePath,
@@ -233,14 +233,16 @@ func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewRespon
 				info.LatestTag = rulesRel.TagName
 				info.PublishedAt = rulesRel.PublishedAt.Format("2006-01-02 15:04:05")
 				info.DownloadURL = asset.BrowserDownloadURL
-				info.HasUpdate = info.SizeBytes != asset.Size
+				isUpToDate := info.SizeBytes > 0 && (info.SizeBytes == asset.Size || (!geoipModRaw.IsZero() && !geoipModRaw.Before(rulesRel.PublishedAt)))
+				info.HasUpdate = !isUpToDate
 				rulesMap["geoip"] = info
 			} else if asset.Name == "geosite.dat" {
 				info := rulesMap["geosite"]
 				info.LatestTag = rulesRel.TagName
 				info.PublishedAt = rulesRel.PublishedAt.Format("2006-01-02 15:04:05")
 				info.DownloadURL = asset.BrowserDownloadURL
-				info.HasUpdate = info.SizeBytes != asset.Size
+				isUpToDate := info.SizeBytes > 0 && (info.SizeBytes == asset.Size || (!geositeModRaw.IsZero() && !geositeModRaw.Before(rulesRel.PublishedAt)))
+				info.HasUpdate = !isUpToDate
 				rulesMap["geosite"] = info
 			}
 		}
