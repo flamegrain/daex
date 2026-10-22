@@ -4558,6 +4558,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  overflow: hidden;
   transition: background-color 0.2s, border-color 0.2s;
 }
 
@@ -5494,7 +5496,24 @@ onMounted(async () => {
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
   transition: background 0.15s;
+}
+
+.node-check-item .node-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.node-check-item .node-flag,
+.node-check-item .node-proto-badge {
+  flex-shrink: 0;
+}
+
+.node-check-item .node-addr {
+  max-width: 180px;
+  flex-shrink: 0;
 }
 
 .node-check-item:hover {

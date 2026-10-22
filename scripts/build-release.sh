@@ -23,6 +23,8 @@ pnpm build
 echo "===> [2/4] 编译 Linux amd64 二进制..."
 cd "${ROOT_DIR}/backend"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "${DIST_DIR}/daex-linux-amd64" .
+mkdir -p "${ROOT_DIR}/bin"
+cp "${DIST_DIR}/daex-linux-amd64" "${ROOT_DIR}/bin/daex"
 
 # 3. 编译 Linux arm64
 echo "===> [3/4] 编译 Linux arm64 二进制..."

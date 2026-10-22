@@ -1250,6 +1250,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+  overflow: hidden;
   transition: background-color 0.2s, border-color 0.2s;
 }
 
@@ -1298,6 +1300,8 @@ onMounted(() => {
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 6px;
   padding: 10px 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .box-label {
@@ -1310,6 +1314,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
 }
 
 .sel-info {
@@ -1317,11 +1323,37 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sel-info strong.truncate {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sel-info .flag-icon,
+.sel-info .proto-badge {
+  flex-shrink: 0;
+}
+
+.sel-latency {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .no-node-text {
   font-size: 12px;
   color: var(--text-muted, #64748b);
+}
+
+.group-filters-section {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .filter-title {
@@ -1334,6 +1366,8 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .filter-chip {
@@ -1342,6 +1376,11 @@ onMounted(() => {
   color: var(--text-main, #cbd5e1);
   padding: 2px 6px;
   border-radius: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
 }
 
 .group-footer {
@@ -1352,11 +1391,19 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .node-keys-preview {
   font-size: 11px;
   color: var(--text-muted, #94a3b8);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Tab 3: Subscriptions */
