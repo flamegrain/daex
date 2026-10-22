@@ -1552,10 +1552,18 @@ onMounted(async () => {
   scrollbar-gutter: stable;
 }
 
+.routing-main > * {
+  flex-shrink: 0;
+}
+
 .rules-view-container {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.rules-view-container > * {
+  flex-shrink: 0;
 }
 
 /* Diagnostics Bar */
@@ -2133,6 +2141,9 @@ onMounted(async () => {
 
 .table-responsive {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: calc(100vh - 280px);
+  scrollbar-gutter: stable;
 }
 
 .routing-table {
@@ -2142,6 +2153,9 @@ onMounted(async () => {
 }
 
 .routing-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   padding: 10px 14px;
   text-align: left;
   font-weight: 600;

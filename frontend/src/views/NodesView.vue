@@ -1257,16 +1257,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
 }
 
 .group-title-wrap {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .group-icon {
   color: #a855f7;
+  flex-shrink: 0;
 }
 
 .group-name {
@@ -1274,6 +1277,9 @@ onMounted(() => {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-main, #f8fafc);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .policy-pill {
@@ -1283,6 +1289,8 @@ onMounted(() => {
   background: rgba(168, 85, 247, 0.15);
   color: #c084fc;
   font-family: monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .group-selected-box {

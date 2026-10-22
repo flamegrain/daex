@@ -3049,11 +3049,11 @@ onMounted(async () => {
               </button>
             </div>
 
-            <div v-else class="cards-grid">
+            <div v-else class="cards-grid groups-cards-grid">
               <div v-for="group in configModel.groups" :key="group.name" class="item-card group-card">
                 <div class="card-top">
-                  <span class="group-badge">Group</span>
-                  <span class="card-key">{{ group.name }}</span>
+                  <span class="group-badge">GROUP</span>
+                  <span class="card-key" :title="group.name">{{ group.name }}</span>
                   <div class="card-actions">
                     <button class="btn-icon" @click="openEditGroup(group)" :title="t('common.edit')">
                       <Edit2 :size="13" />
@@ -3063,17 +3063,20 @@ onMounted(async () => {
                     </button>
                   </div>
                 </div>
-                <div class="card-info">
-                  <div class="row">
-                    <span class="lbl">{{ t('config.field.group_policy') }}:</span>
-                    <span class="val code-tag">{{ group.policy || 'default' }}</span>
+                <div class="card-info group-card-info">
+                  <div class="group-meta-row">
+                    <span class="meta-label">{{ t('config.field.group_policy') }}</span>
+                    <span class="val code-tag">{{ group.policy || 'min_moving_avg' }}</span>
                   </div>
-                  <div class="filter-list">
-                    <span class="lbl">{{ t('config.field.group_filters') }}:</span>
-                    <div class="chips-wrap">
-                      <span v-for="(f, i) in group.filters" :key="i" class="filter-chip">
+                  <div class="group-filter-box">
+                    <span class="meta-label">{{ t('nodes.group.filters') }}</span>
+                    <div v-if="group.filters && group.filters.length > 0" class="chips-wrap">
+                      <span v-for="(f, i) in group.filters" :key="i" class="filter-chip" :title="f">
                         {{ f }}
                       </span>
+                    </div>
+                    <div v-else class="chips-wrap">
+                      <span class="filter-chip empty-chip">全部可用节点 (无过滤限制)</span>
                     </div>
                   </div>
                 </div>
@@ -4440,6 +4443,7 @@ onMounted(async () => {
 
 .workspace-area {
   flex: 1;
+  min-height: 0;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -4449,13 +4453,17 @@ onMounted(async () => {
 
 /* Form Mode Layout */
 .form-mode-container {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
   background: var(--bg-main, #090d16);
 }
 
 .form-subnav {
+  flex-shrink: 0;
   display: flex;
   gap: 4px;
   padding: 8px 16px;
@@ -4509,6 +4517,10 @@ onMounted(async () => {
   scrollbar-gutter: stable;
 }
 
+.form-section-body > * {
+  flex-shrink: 0;
+}
+
 .section-title-bar {
   display: flex;
   align-items: center;
@@ -4533,6 +4545,11 @@ onMounted(async () => {
   gap: 14px;
 }
 
+.cards-grid.groups-cards-grid {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
 .item-card {
   background: var(--bg-card, #0f172a);
   border: 1px solid var(--border-color, #1e293b);
@@ -4542,6 +4559,11 @@ onMounted(async () => {
   flex-direction: column;
   gap: 10px;
   transition: background-color 0.2s, border-color 0.2s;
+}
+
+.item-card.group-card {
+  padding: 16px;
+  gap: 12px;
 }
 
 .card-top {
@@ -4558,15 +4580,21 @@ onMounted(async () => {
   padding: 2px 6px;
   border-radius: 4px;
   font-family: monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .group-badge {
   font-size: 10px;
-  font-weight: 600;
-  background: #7e22ce22;
-  color: #9333ea;
-  padding: 2px 6px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  background: rgba(147, 51, 234, 0.16);
+  color: #a855f7;
+  border: 1px solid rgba(168, 85, 247, 0.28);
+  padding: 2px 7px;
   border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .sub-badge {
@@ -4576,14 +4604,17 @@ onMounted(async () => {
   color: #16a34a;
   padding: 2px 6px;
   border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .card-key {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-main, #e2e8f0);
   font-family: monospace;
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4592,54 +4623,102 @@ onMounted(async () => {
 .card-actions {
   display: flex;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .card-info {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
   color: var(--text-muted, #94a3b8);
 }
 
+.card-info.group-card-info {
+  gap: 10px;
+}
+
 .card-info .row {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .card-info .lbl {
   color: var(--text-muted, #64748b);
-  width: 36px;
+  min-width: 36px;
+  width: auto;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
 .card-info .val {
   color: var(--text-main, #cbd5e1);
+  min-width: 0;
+}
+
+.group-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  background: var(--bg-input, rgba(15, 23, 42, 0.55));
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 6px;
+}
+
+.meta-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.group-filter-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .code-tag {
-  background: var(--bg-input, #1e293b);
-  color: #0284c7;
-  padding: 1px 6px;
+  background: rgba(2, 132, 199, 0.14);
+  border: 1px solid rgba(2, 132, 199, 0.28);
+  color: #38bdf8;
+  padding: 2px 8px;
   border-radius: 4px;
   font-family: monospace;
   font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .chips-wrap {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
+  gap: 6px;
 }
 
 .filter-chip {
   background: var(--bg-input, #1e293b);
+  border: 1px solid var(--border-color, #334155);
   color: var(--text-main, #cbd5e1);
   font-size: 11px;
   font-family: monospace;
-  padding: 2px 6px;
+  padding: 3px 8px;
   border-radius: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-chip.empty-chip {
+  color: var(--text-muted, #64748b);
+  font-style: italic;
 }
 
 /* Rule table */
@@ -4647,7 +4726,11 @@ onMounted(async () => {
   background: var(--bg-card, #0f172a);
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 8px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: auto;
+  max-height: calc(100vh - 260px);
+  flex-shrink: 0;
+  scrollbar-gutter: stable;
 }
 
 .rule-table {
@@ -4657,6 +4740,9 @@ onMounted(async () => {
 }
 
 .rule-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   text-align: left;
   padding: 10px 14px;
   background: var(--bg-input, #0b1120);
@@ -6802,6 +6888,7 @@ onMounted(async () => {
   border: 1px solid var(--border-color, #1e293b);
   border-radius: 10px;
   overflow: hidden;
+  flex-shrink: 0;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
@@ -7353,6 +7440,9 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .btn-back {
