@@ -7,7 +7,8 @@ cd "$(dirname "$0")/.."
 sync() { make -s sync; }
 
 sync
-echo "[watch] initial sync done -> ${VM:-root@192.168.3.10}:${REMOTE:-/opt/daex}"
+TARGET_HOST="${VM:-$([ -f .vm_host ] && cat .vm_host || echo "root@192.168.1.100")}"
+echo "[watch] initial sync done -> ${TARGET_HOST}:${REMOTE:-/opt/daex}"
 
 if command -v fswatch >/dev/null; then
   echo "[watch] using fswatch"

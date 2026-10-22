@@ -34,12 +34,12 @@
 
 | 属性项 | 配置详情 |
 | :--- | :--- |
-| **服务器地址** | `192.168.3.10` (Debian/Ubuntu Linux) |
-| **登录用户** | `root` (免密 SSH 密钥配置有效) |
+| **服务器地址** | `192.168.x.x` (例如: Debian/Ubuntu Linux 测试主机) |
+| **登录用户** | `root` (免密 SSH 密钥配置) |
 | **项目工作目录** | `/opt/daex` *(注意：原 `/opt/dae-webui` 已彻底清空并移除)* |
 | **编译环境变量** | `/etc/profile.d/daex-dev.sh` (包含 Go、Node、pnpm 路径) |
 | **服务配置路径** | `/etc/systemd/system/daex.service` |
-| **控制台访问端口** | `http://192.168.3.10:9091` |
+| **控制台访问端口** | `http://<SERVER_IP>:9091` |
 | **dae 真实配置路径** | `/usr/local/etc/dae/config.dae` |
 | **备份文件目录** | `/var/log/daex/backups` |
 | **当前运行命令** | `/usr/local/bin/daex -listen 0.0.0.0:9091 -allow-system-config -backup-dir /var/log/daex/backups` |
@@ -125,7 +125,7 @@ make logs
 make status
 ```
 
-### 2. 远端直接重新打包与发布 (在 192.168.3.10 上)
+### 2. 远端直接重新打包与发布 (在测试机上)
 ```bash
 cd /opt/daex
 . /etc/profile.d/daex-dev.sh

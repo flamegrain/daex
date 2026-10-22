@@ -16,3 +16,6 @@ sublist
 persist.d/
 data/
 webui_user.json
+.vm_host
+.env
+.env.local

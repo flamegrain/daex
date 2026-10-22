@@ -1,17 +1,16 @@
-# daeX — 本地编辑，VM (192.168.3.10) 上运行/调试/发布
+# daeX — 本地编辑，测试主机上运行/调试/发布
 #
 # 本地 (macOS) 常用:
 #   make dev-setup   首次: 同步代码 + 安装依赖 + 安装并启动 dev systemd 服务
-#   make watch       持续同步本地改动到 VM (air / Vite 自动热重载)
+#   make watch       持续同步本地改动到测试机 (air / Vite 自动热重载)
 #   make sync        手动同步一次
 #   make logs        跟踪 dev 服务日志
 #   make status      查看 dev / dae 服务状态
 #   make deploy      构建并发布生产版 (systemd: daex, :9091)
-#   make ssh         SSH 到 VM 项目目录
+#   make ssh         SSH 到测试机项目目录
 #
-# vm-* 目标在 VM 上执行 (由上面的目标通过 ssh 调用)。
-
-VM          ?= root@192.168.3.10
+# 可在本地新建 .vm_host 文件配置目标主机 (已加入 gitignore)，或通过环境变量 VM=root@<IP> 指定
+VM          ?= $(shell [ -f .vm_host ] && cat .vm_host || echo "root@192.168.1.100")
 REMOTE      ?= /opt/daex
 SSH_OPTS    ?= -o ControlMaster=auto -o ControlPath=/tmp/daex-ssh-%C -o ControlPersist=10m
 SSH         := ssh $(SSH_OPTS) $(VM)

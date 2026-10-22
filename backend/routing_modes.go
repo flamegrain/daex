@@ -111,7 +111,7 @@ func getBuiltinModes() []RoutingMode {
 					Status: "ok", Latency: 98, HttpCode: 200, Message: "命中 gfwlist 规则，代理链路通信正常",
 				},
 				{
-					ID: "lan", Name: "局域网路由器管理", Url: "http://192.168.3.1", Category: "内网直连",
+					ID: "lan", Name: "局域网路由器管理", Url: "http://192.168.1.1", Category: "内网直连",
 					ExpectedOut: "局域网直连 (direct)", MatchedRule: "dip(geoip:private) -> direct",
 					Status: "ok", Latency: 2, HttpCode: 200, Message: "局域网私网强直连保护，防止内网断联",
 				},
@@ -170,7 +170,7 @@ func getBuiltinModes() []RoutingMode {
 					Status: "ok", Latency: 65, HttpCode: 204, Message: "境外视频 CDN 节点连通正常",
 				},
 				{
-					ID: "lan", Name: "局域网网关管理", Url: "http://192.168.3.1", Category: "内网直连",
+					ID: "lan", Name: "局域网网关管理", Url: "http://192.168.1.1", Category: "内网直连",
 					ExpectedOut: "局域网直连 (direct)", MatchedRule: "dip(geoip:private) -> direct",
 					Status: "ok", Latency: 2, HttpCode: 200, Message: "内网通信安全直连，完全隔离代理流量",
 				},
@@ -223,7 +223,7 @@ func getBuiltinModes() []RoutingMode {
 					Status: "ok", Latency: 22, HttpCode: 200, Message: "境外服务器本地网络极速直达",
 				},
 				{
-					ID: "lan", Name: "局域网网关管理", Url: "http://192.168.3.1", Category: "内网直连",
+					ID: "lan", Name: "局域网网关管理", Url: "http://192.168.1.1", Category: "内网直连",
 					ExpectedOut: "局域网直连 (direct)", MatchedRule: "dip(geoip:private) -> direct",
 					Status: "ok", Latency: 2, HttpCode: 200, Message: "局域网内网保护免代理直通",
 				},
@@ -277,7 +277,7 @@ func getBuiltinModes() []RoutingMode {
 					Status: "ok", Latency: 92, HttpCode: 200, Message: "隐藏本地真实 IP，全局加密传输",
 				},
 				{
-					ID: "lan", Name: "局域网网关访问", Url: "http://192.168.3.1", Category: "内网直连",
+					ID: "lan", Name: "局域网网关访问", Url: "http://192.168.1.1", Category: "内网直连",
 					ExpectedOut: "局域网直连 (direct)", MatchedRule: "dip(geoip:private) -> direct",
 					Status: "ok", Latency: 2, HttpCode: 200, Message: "局域网白名单直连保护，管理后台不走代理",
 				},
@@ -540,7 +540,7 @@ func handleCreateCustomMode(o Options) http.HandlerFunc {
 				Status: "ok", Latency: 65 + rand.Intn(15), HttpCode: 204, Message: "海外链路探针返回正常",
 			},
 			{
-				ID: "lan", Name: "局域网网关管理", Url: "http://192.168.3.1", Category: "内网直连",
+				ID: "lan", Name: "局域网网关管理", Url: "http://192.168.1.1", Category: "内网直连",
 				ExpectedOut: "局域网直连", MatchedRule: "dip(geoip:private) -> direct",
 				Status: "ok", Latency: 2, HttpCode: 200, Message: "局域网内网安全直连",
 			},

@@ -134,14 +134,14 @@ func getDaeLogs(serviceName string, limit int) ([]LogEntry, string) {
 		{50, "INFO", "dns", "dns server listening on 127.0.0.1:53, upstream: alidns (223.5.5.5:53), googledns (8.8.8.8:53)"},
 		{45, "INFO", "proxy", "group 'proxy': policy min_moving_avg selected node 'hk_vless_01' (latency: 32ms)"},
 		{40, "INFO", "routing", "matched rule [domain(geosite:cn)] -> direct for host 'www.bilibili.com:443'"},
-		{35, "INFO", "routing", "matched rule [dip(geoip:private)] -> direct for destination 192.168.3.1:22"},
+		{35, "INFO", "routing", "matched rule [dip(geoip:private)] -> direct for destination 192.168.1.1:22"},
 		{30, "WARN", "dns", "upstream query timeout for 'test-subdomain.com' via alidns (retry 1/2)"},
 		{25, "INFO", "dns", "qname 'github.com' resolved to 20.205.243.166 via googledns in 48ms"},
 		{20, "INFO", "routing", "matched rule [domain(geosite:github)] -> proxy group for 20.205.243.166:443"},
 		{15, "ERROR", "proxy", "tcp check failed for backup node 'sg_vmess_02': dial tcp: i/o timeout"},
 		{10, "INFO", "ebpf", "tproxy_port: 12345 active, bypass packets count: 18,294, routed packets: 95,201"},
 		{5, "INFO", "routing", "fallback: proxy selected for unknown foreign flow 104.16.132.229:443"},
-		{2, "DEBUG", "ebpf", "packet conntrack entry refreshed for connection from 192.168.3.100:54210"},
+		{2, "DEBUG", "ebpf", "packet conntrack entry refreshed for connection from 192.168.1.100:54210"},
 		{0, "INFO", "system", "health check heartbeat passed. memory: 18.4MB, goroutines: 38"},
 	}
 
