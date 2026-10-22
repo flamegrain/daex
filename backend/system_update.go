@@ -264,7 +264,16 @@ func downloadFileToMemory(ctx context.Context, urlStr string) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", "daex-updater")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		ResponseHeaderTimeout: 10 * time.Second,
+		TLSHandshakeTimeout:   8 * time.Second,
+		IdleConnTimeout:       30 * time.Second,
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   90 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -297,17 +306,10 @@ func executeDaeUpdate(ctx context.Context, daeBin, downloadURL string) UpdateExe
 	addLog("1. 正在从 GitHub 下载发布包: " + downloadURL)
 	data, err := downloadFileToMemory(ctx, downloadURL)
 	if err != nil {
-		addLog("⚠️ GitHub 直连下载异常: " + err.Error())
-		addLog("💡 模拟沙箱环境防护：执行无损升级验证...")
-		time.Sleep(500 * time.Millisecond)
-		addLog("2. 校验发布包签名与 SHA256 哈希完整性...")
-		addLog("3. 创建当前可执行文件备份: " + daeBin + ".bak")
-		addLog("4. 安全替换并更新二进制文件权限: chmod 0755 " + daeBin)
-		addLog("5. 重新载入系统服务: systemctl restart dae")
-		addLog("✅ dae 主程序更新完成！当前运行正常。")
+		addLog("❌ 下载 dae 发布包失败: " + err.Error())
 		return UpdateExecutionResult{
-			Success: true,
-			Message: "dae 主程序更新完成",
+			Success: false,
+			Message: "下载 dae 发布包失败: " + err.Error(),
 			Logs:    logs,
 		}
 	}
@@ -392,49 +394,105 @@ func executeRulesUpdate(ctx context.Context, types []string) UpdateExecutionResu
 		}
 	}
 
-	targetDirs := []string{"/usr/local/share/dae", "/etc/dae"}
+	targetDirs := []string{"/usr/local/share/dae", "/etc/dae", "/usr/share/dae"}
 
-	downloadMap := map[string]string{
-		"geoip":   "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
-		"geosite": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+	downloadMirrors := map[string][]string{
+		"geoip": {
+			"https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat",
+			"https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat",
+			"https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat",
+			"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+		},
+		"geosite": {
+			"https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat",
+			"https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat",
+			"https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat",
+			"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+		},
 	}
 
-	for rType, dlURL := range downloadMap {
+	var failedFiles []string
+	var updatedFiles []string
+
+	for _, rType := range []string{"geoip", "geosite"} {
 		if !targetTypes[rType] {
 			continue
 		}
 
+		urls := downloadMirrors[rType]
 		datName := rType + ".dat"
-		addLog(fmt.Sprintf("1. 正在获取最新规则库: %s (%s)", datName, dlURL))
+		addLog(fmt.Sprintf("1. 正在获取最新规则库: %s", datName))
 
-		data, err := downloadFileToMemory(ctx, dlURL)
-		if err != nil {
-			addLog(fmt.Sprintf("⚠️ 远端直连下载 %s 失败: %v", datName, err))
-			addLog("💡 模拟沙箱环境防护：执行安全覆盖与完整性校验...")
-			time.Sleep(300 * time.Millisecond)
-			addLog(fmt.Sprintf("✓ 成功更新 %s 索引与规则段", datName))
+		var data []byte
+		var lastErr error
+		for idx, dlURL := range urls {
+			addLog(fmt.Sprintf("   ↳ 尝试源 [%d/%d]: %s", idx+1, len(urls), dlURL))
+			d, err := downloadFileToMemory(ctx, dlURL)
+			if err != nil {
+				lastErr = err
+				addLog(fmt.Sprintf("   ⚠️ 源 [%d/%d] 下载失败: %v", idx+1, len(urls), err))
+				continue
+			}
+			if len(d) < 100*1024 {
+				lastErr = fmt.Errorf("返回文件大小异常 (%d bytes)", len(d))
+				addLog(fmt.Sprintf("   ⚠️ 源 [%d/%d] 数据校验未通过: %v", idx+1, len(urls), lastErr))
+				continue
+			}
+			data = d
+			lastErr = nil
+			break
+		}
+
+		if len(data) == 0 {
+			addLog(fmt.Sprintf("❌ 所有下载源均未能获取 %s: %v", datName, lastErr))
+			failedFiles = append(failedFiles, datName)
 			continue
 		}
 
 		addLog(fmt.Sprintf("✓ %s 下载成功 (数据大小: %s)", datName, formatFileSize(int64(len(data)))))
 
-		// Write to all existing target directories
+		// Write atomically to all existing target directories
 		written := false
 		for _, dir := range targetDirs {
 			if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 				dest := filepath.Join(dir, datName)
+				tmpDest := dest + ".tmp"
 				addLog("2. 正在更新目标路径文件: " + dest)
-				if writeErr := os.WriteFile(dest, data, 0644); writeErr == nil {
-					written = true
-					addLog("✓ 已成功写入: " + dest)
+				if writeErr := os.WriteFile(tmpDest, data, 0644); writeErr == nil {
+					if renErr := os.Rename(tmpDest, dest); renErr == nil {
+						written = true
+						addLog(fmt.Sprintf("✓ 已成功写入: %s (%s)", dest, formatFileSize(int64(len(data)))))
+					} else {
+						_ = os.Remove(tmpDest)
+						addLog("⚠️ 替换文件失败: " + renErr.Error())
+					}
+				} else {
+					addLog("⚠️ 写入临时文件失败: " + writeErr.Error())
 				}
 			}
 		}
 		if !written {
 			dest := "/usr/local/share/dae/" + datName
 			_ = os.MkdirAll("/usr/local/share/dae", 0755)
-			_ = os.WriteFile(dest, data, 0644)
-			addLog("✓ 已成功写入新目录: " + dest)
+			if writeErr := os.WriteFile(dest, data, 0644); writeErr == nil {
+				written = true
+				addLog(fmt.Sprintf("✓ 已成功写入新目录: %s (%s)", dest, formatFileSize(int64(len(data)))))
+			} else {
+				addLog("❌ 写入目标路径失败: " + writeErr.Error())
+				failedFiles = append(failedFiles, datName)
+				continue
+			}
+		}
+		updatedFiles = append(updatedFiles, datName)
+	}
+
+	if len(failedFiles) > 0 {
+		msg := fmt.Sprintf("规则库更新失败 (%s 未能成功下载)，原有规则文件未做改动", strings.Join(failedFiles, ", "))
+		addLog("❌ " + msg)
+		return UpdateExecutionResult{
+			Success: false,
+			Message: msg,
+			Logs:    logs,
 		}
 	}
 
@@ -443,10 +501,11 @@ func executeRulesUpdate(ctx context.Context, types []string) UpdateExecutionResu
 	_ = exec.Command("dae", "reload").Run()
 	_ = exec.Command("systemctl", "reload", "dae").Run()
 
-	addLog("✅ 规则库全部更新完成并已实时生效！")
+	msg := fmt.Sprintf("规则库 (%s) 更新完成并已实时生效！", strings.Join(updatedFiles, ", "))
+	addLog("✅ " + msg)
 	return UpdateExecutionResult{
 		Success: true,
-		Message: "规则库已成功更新并生效",
+		Message: msg,
 		Logs:    logs,
 	}
 }

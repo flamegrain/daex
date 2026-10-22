@@ -80,6 +80,7 @@ const loadingRuleLists = ref(false)
 const updatingAllLists = ref(false)
 const updatingListId = ref<string | null>(null)
 const listUpdateNotification = ref<string | null>(null)
+const listUpdateError = ref<boolean>(false)
 
 const templateMeta = ref({
   version: '2026.10.07',
@@ -188,9 +189,16 @@ async function triggerRulesUpdate(types: string[] = []) {
       if (result.logs && Array.isArray(result.logs)) {
         executionLogs.value = result.logs
       }
+      listUpdateError.value = !result.success
+      listUpdateNotification.value = result.message || (result.success ? '规则库更新成功' : '规则库更新失败')
+      setTimeout(() => {
+        listUpdateNotification.value = null
+      }, 7000)
       await fetchUpdateCheck()
     }
   } catch (e: any) {
+    listUpdateError.value = true
+    listUpdateNotification.value = t('update.log_update_failed', { error: e?.message || e })
     executionLogs.value.push(t('update.log_update_failed', { error: e?.message || e }))
   } finally {
     updatingRules.value = false
@@ -276,13 +284,15 @@ async function triggerRuleListUpdate(listId?: string) {
       executionLogs.value = data.logs
     }
     if (res.ok && data.ok) {
+      listUpdateError.value = false
       listUpdateNotification.value = data.message || `更新成功！更新时间: ${data.updatedAt}，已更新 ${data.entriesCount} 条数据`
       setTimeout(() => {
         listUpdateNotification.value = null
       }, 7000)
       await fetchRuleLists()
     } else {
-      alert(data.error || '更新失败')
+      listUpdateError.value = true
+      listUpdateNotification.value = data.error || '更新失败'
     }
   } catch (err: any) {
     executionLogs.value.push(`[${new Date().toLocaleTimeString()}] ❌ 规则列表更新请求异常: ${err.message}`)
@@ -325,9 +335,10 @@ onMounted(() => {
 
     <main class="update-content">
       <!-- Notification banner for rule list update -->
-      <div v-if="listUpdateNotification" class="update-notification-banner">
+      <div v-if="listUpdateNotification" class="update-notification-banner" :class="{ 'is-error': listUpdateError }">
         <div class="banner-left">
-          <CheckCircle2 :size="18" class="text-success" />
+          <AlertCircle v-if="listUpdateError" :size="18" class="text-danger" />
+          <CheckCircle2 v-else :size="18" class="text-success" />
           <span>{{ listUpdateNotification }}</span>
         </div>
         <button class="btn-close-sm" @click="listUpdateNotification = null">
@@ -475,7 +486,7 @@ onMounted(() => {
                     @click="updateSingle(String(key))"
                   >
                     <RefreshCw :size="12" :class="{ spin: updatingSingleRule === key }" />
-                    <span>{{ t('update.rules.update_single') }}</span>
+                    <span>{{ updatingSingleRule === key ? t('update.rules.updating') : t('update.rules.update_single') }}</span>
                   </button>
                 </td>
               </tr>
@@ -1064,6 +1075,12 @@ onMounted(() => {
   color: #f1f5f9;
   font-size: 13px;
   font-weight: 500;
+}
+
+.update-notification-banner.is-error {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
 }
 
 .banner-left {
