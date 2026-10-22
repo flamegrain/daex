@@ -57,7 +57,7 @@ Strictly adheres to dae's "First-Match-Wins" rule hierarchy. Supports drag-and-d
 ---
 
 ### 5. Outbound Nodes & Grouping Policies
-Parse and manage VLESS, VMess, Trojan, Shadowsocks, Hysteria2 protocols. Schedule grouping policies (`min_moving_avg`, `min_avg10`, `fallback`, `random`) with automatic subscription updates.
+Parse and manage VLESS, VMess, Trojan, Shadowsocks, Hysteria2 protocols. Schedule grouping policies (`min_moving_avg`, `min_avg10`, `min`, `random`, and visual `fixed(N)` node pinning) with reactive subscription/node linkage.
 <p align="center">
   <img src="docs/screenshots/en/nodes.png" width="100%" alt="daeX Nodes and Policies" />
 </p>

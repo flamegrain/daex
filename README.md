@@ -57,7 +57,7 @@
 ---
 
 ### 5. 节点与出站策略组管理 (Nodes & Policies)
-支持 VLESS, VMess, Trojan, Shadowsocks, Hysteria2 等协议节点解析、多分组策略调度（min_moving_avg、min_avg10、fallback、random）及订阅源自动拉取。
+支持 VLESS, VMess, Trojan, Shadowsocks, Hysteria2 等协议节点解析、多分组策略调度（`min_moving_avg`、`min_avg10`、`min`、`random` 及 `fixed(N)` 固定节点可视选定）与订阅源/手工节点联动。
 <p align="center">
   <img src="docs/screenshots/nodes.png" width="100%" alt="daeX Nodes and Policies" />
 </p>

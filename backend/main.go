@@ -28,7 +28,7 @@ import (
 	"syscall"
 	"time"
 
-	"dae-webui/internal/webui"
+	"daex/internal/webui"
 )
 
 var version = "dev"

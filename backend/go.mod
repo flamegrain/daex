@@ -1,3 +1,3 @@
-module dae-webui
+module daex
 
 go 1.27
