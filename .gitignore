@@ -19,3 +19,7 @@ webui_user.json
 .vm_host
 .env
 .env.local
+
+# Handoff docs (prohibit syncing to git/remote)
+.handoff.md
+.handoff.*.md
