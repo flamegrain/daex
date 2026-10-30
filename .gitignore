@@ -23,3 +23,7 @@ webui_user.json
 # Handoff docs (prohibit syncing to git/remote)
 .handoff.md
 .handoff.*.md
+*HANDOVER_CONTEXT*
+docs/HANDOVER_CONTEXT.md
+HANDOVER_CONTEXT.md
+*HANDOVER*
