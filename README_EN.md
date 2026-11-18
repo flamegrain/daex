@@ -81,6 +81,7 @@ Seamless integration with systemd daemon: live metrics (PID, Memory, CPU, Uptime
 - 🌐 **Comprehensive Protocol Support**: Automatically extracts and normalizes outbound nodes from multi-protocol share links and provider subscriptions.
 - 📜 **Live Logs & Snapshots**: Colored real-time journalctl streaming (INFO/WARN/ERROR/DEBUG), keyword filtering, and downloadable log backups.
 - ⚙️ **Service Lifecycle Control**: Manage both `dae` and `daex` services via systemd, inspect resource utilization, and trigger smooth configuration reloads.
+- 🔄 **Resilient Multi-Mirror Updates & Offline Upgrade**: Built-in DoH anti-hijack resolution and automatic failover across GitHub API, 302 web redirects, and acceleration mirrors—allowing `dae` core and `geoip.dat`/`geosite.dat` updates even on fresh installs without active proxy nodes, backed by official `.dgst` SHA-256 verification, ELF/architecture self-check with auto-rollback, and manual `.zip` package upload.
 - 🩺 **Built-in System Doctor**: Command-line and WebUI diagnostics validating kernel eBPF support, BPF mount points, config syntax, and network paths.
 - 🌓 **Dual Themes & Full Bilingual**: Seamless dark/light theme toggle and 100% complete English and Simplified Chinese support.
 

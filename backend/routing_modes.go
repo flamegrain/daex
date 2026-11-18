@@ -75,7 +75,7 @@ func getBuiltinModes() []RoutingMode {
 				Fallback: "googledns",
 			},
 			Rules: []RoutingModeRule{
-				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq)", Target: "must_direct"},
+				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq, daex)", Target: "must_direct"},
 				{Condition: "dip(224.0.0.0/3, 'ff00::/8')", Target: "direct"},
 				{Condition: "dip(geoip:private)", Target: "direct"},
 				{Condition: "domain(geosite:category-ads-all)", Target: "block"},
@@ -135,7 +135,7 @@ func getBuiltinModes() []RoutingMode {
 				Fallback: "googledns",
 			},
 			Rules: []RoutingModeRule{
-				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq)", Target: "must_direct"},
+				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq, daex)", Target: "must_direct"},
 				{Condition: "dip(224.0.0.0/3, 'ff00::/8')", Target: "direct"},
 				{Condition: "dip(geoip:private)", Target: "direct"},
 				{Condition: "domain(geosite:category-ads-all)", Target: "block"},
@@ -194,7 +194,7 @@ func getBuiltinModes() []RoutingMode {
 				Fallback: "alidns",
 			},
 			Rules: []RoutingModeRule{
-				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq)", Target: "must_direct"},
+				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq, daex)", Target: "must_direct"},
 				{Condition: "dip(224.0.0.0/3, 'ff00::/8')", Target: "direct"},
 				{Condition: "dip(geoip:private)", Target: "direct"},
 				{Condition: "domain(geosite:cn)", Target: "proxy"},
@@ -245,7 +245,7 @@ func getBuiltinModes() []RoutingMode {
 				Fallback:     "googledns",
 			},
 			Rules: []RoutingModeRule{
-				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq)", Target: "must_direct"},
+				{Condition: "pname(NetworkManager, systemd-resolved, dnsmasq, daex)", Target: "must_direct"},
 				{Condition: "dip(224.0.0.0/3, 'ff00::/8')", Target: "direct"},
 				{Condition: "dip(geoip:private)", Target: "direct"},
 				{Condition: "fallback", Target: "proxy"},

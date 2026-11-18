@@ -61,6 +61,8 @@ group {
 }
 
 routing {
+    pname(NetworkManager, systemd-resolved, dnsmasq, daex) -> must_direct
+    dip(geoip:private) -> direct
 }
 `
 
@@ -559,6 +561,31 @@ func main() {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		res := executeDaeUpdate(r.Context(), o.DaeBin, req.DownloadURL)
+		writeJSON(w, http.StatusOK, res)
+	})
+
+	mux.HandleFunc("POST /api/update/dae/upload", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 120<<20) // up to 120MB
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, UpdateExecutionResult{
+				Success: false,
+				Message: "读取上传文件失败: " + err.Error(),
+				Logs:    []string{"❌ 读取上传文件失败: " + err.Error()},
+			})
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, UpdateExecutionResult{
+				Success: false,
+				Message: "读取文件内容失败: " + err.Error(),
+				Logs:    []string{"❌ 读取文件内容失败: " + err.Error()},
+			})
+			return
+		}
+		res := executeDaeUploadUpdate(o.DaeBin, header.Filename, data)
 		writeJSON(w, http.StatusOK, res)
 	})
 

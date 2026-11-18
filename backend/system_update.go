@@ -5,18 +5,32 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+var githubMirrorPrefixes = []string{
+	"https://ghfast.top/",
+	"https://gh-proxy.com/",
+	"https://mirror.ghproxy.com/",
+}
+
+var reSHA256Hex = regexp.MustCompile(`(?i)(?:sha2?-?256\s*[=:]\s*|^|\s)([a-f0-9]{64})(?:\s|$)`)
 
 type GitHubRelease struct {
 	TagName     string        `json:"tag_name"`
@@ -41,6 +55,8 @@ type DaeProgramInfo struct {
 	Changelog      string `json:"changelog"`
 	DownloadURL    string `json:"downloadUrl"`
 	Arch           string `json:"arch"`
+	Source         string `json:"source,omitempty"`
+	CheckError     string `json:"checkError,omitempty"`
 }
 
 type RuleFileInfo struct {
@@ -110,31 +126,324 @@ func getCurrentDaeVersion(daeBin string) string {
 	return "v2.1.1" // realistic fallback
 }
 
-func fetchGitHubLatestRelease(ctx context.Context, repo string) (*GitHubRelease, error) {
+// isNewerVersion compares semantic version strings (e.g. "v2.1.1" vs "v2.1.2" or date tags like "202611182212").
+func isNewerVersion(currVer, latestVer string) bool {
+	c := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(currVer)), "v")
+	l := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(latestVer)), "v")
+	if l == "" || l == c {
+		return false
+	}
+	cParts := strings.Split(strings.Split(c, "-")[0], ".")
+	lParts := strings.Split(strings.Split(l, "-")[0], ".")
+	maxLen := len(cParts)
+	if len(lParts) > maxLen {
+		maxLen = len(lParts)
+	}
+	for i := 0; i < maxLen; i++ {
+		var cv, lv int
+		var cerr, lerr error
+		if i < len(cParts) {
+			cv, cerr = strconv.Atoi(cParts[i])
+		}
+		if i < len(lParts) {
+			lv, lerr = strconv.Atoi(lParts[i])
+		}
+		if cerr != nil || lerr != nil {
+			return l != c
+		}
+		if lv > cv {
+			return true
+		}
+		if lv < cv {
+			return false
+		}
+	}
+	return l != c
+}
+
+type dohCacheEntry struct {
+	ip      string
+	expires time.Time
+}
+
+var (
+	dohMu    sync.RWMutex
+	dohCache = make(map[string]dohCacheEntry)
+)
+
+// resolveHostViaDoH resolves a hostname over HTTPS DoH to domestic public DNS IP literals (223.5.5.5 / 1.12.12.12).
+// Because 223.5.5.5:443 is a CN IP literal on TCP port 443, it is never hijacked by dae's port-53 DNS interceptor
+// or routed to dead outbound proxy groups.
+func resolveHostViaDoH(ctx context.Context, host string) (string, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", fmt.Errorf("empty host")
+	}
+	if net.ParseIP(host) != nil {
+		return host, nil
+	}
+
+	dohMu.RLock()
+	if ent, ok := dohCache[host]; ok && time.Now().Before(ent.expires) {
+		dohMu.RUnlock()
+		return ent.ip, nil
+	}
+	dohMu.RUnlock()
+
+	endpoints := []string{
+		fmt.Sprintf("https://223.5.5.5/resolve?name=%s&type=A", url.QueryEscape(host)),
+		fmt.Sprintf("https://1.12.12.12/resolve?name=%s&type=A", url.QueryEscape(host)),
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	for _, ep := range endpoints {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Accept", "application/dns-json")
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			continue
+		}
+		var parsed struct {
+			Answer []struct {
+				Type int    `json:"type"`
+				Data string `json:"data"`
+			} `json:"Answer"`
+		}
+		if json.Unmarshal(body, &parsed) == nil {
+			for _, ans := range parsed.Answer {
+				ipStr := strings.TrimSpace(ans.Data)
+				if ans.Type == 1 && net.ParseIP(ipStr) != nil {
+					dohMu.Lock()
+					dohCache[host] = dohCacheEntry{ip: ipStr, expires: time.Now().Add(5 * time.Minute)}
+					dohMu.Unlock()
+					return ipStr, nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("DoH resolution failed for %s", host)
+}
+
+// fetchURLWithBypass fetches a URL even when dae is running with unconfigured/broken proxy nodes
+// that hijack standard port-53 DNS or non-CN TCP traffic.
+func fetchURLWithBypass(ctx context.Context, targetURL string, acceptHeader string, timeout time.Duration) ([]byte, error) {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve target host via DoH (223.5.5.5:443 is a CN IP literal, never hijacked by dae port-53 DNS).
+	hostsToResolve := []string{u.Hostname()}
+	if u.Hostname() == "github.com" && strings.Contains(targetURL, "/releases/") {
+		hostsToResolve = append(hostsToResolve,
+			"objects.githubusercontent.com",
+			"release-assets.githubusercontent.com",
+		)
+	}
+
+	resolvedMap := make(map[string]string)
+	var wg sync.WaitGroup
+	var resMu sync.Mutex
+	for _, h := range hostsToResolve {
+		if h == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(host string) {
+			defer wg.Done()
+			if ip, rErr := resolveHostViaDoH(ctx, host); rErr == nil && ip != "" {
+				resMu.Lock()
+				resolvedMap[host] = ip
+				resMu.Unlock()
+			}
+		}(h)
+	}
+	wg.Wait()
+
+	// 1. Try Go HTTP client with DoH-resolved IP (succeeds fast when dae proxy is healthy or daex is must_direct)
+	primaryTimeout := 3 * time.Second
+	if timeout > 30*time.Second {
+		primaryTimeout = 10 * time.Second
+	}
+	dialer := &net.Dialer{Timeout: 2500 * time.Millisecond}
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(dCtx context.Context, network, addr string) (net.Conn, error) {
+			h, p, sErr := net.SplitHostPort(addr)
+			if sErr == nil {
+				resMu.Lock()
+				ip, ok := resolvedMap[h]
+				resMu.Unlock()
+				if ok {
+					addr = net.JoinHostPort(ip, p)
+				} else if dIP, rErr := resolveHostViaDoH(dCtx, h); rErr == nil && dIP != "" {
+					addr = net.JoinHostPort(dIP, p)
+				}
+			}
+			return dialer.DialContext(dCtx, network, addr)
+		},
+		TLSHandshakeTimeout:   2500 * time.Millisecond,
+		ResponseHeaderTimeout: primaryTimeout,
+	}
+	primaryCtx, primaryCancel := context.WithTimeout(ctx, primaryTimeout)
+	req, reqErr := http.NewRequestWithContext(primaryCtx, http.MethodGet, targetURL, nil)
+	if reqErr == nil {
+		req.Header.Set("User-Agent", "daex-updater")
+		if acceptHeader != "" {
+			req.Header.Set("Accept", acceptHeader)
+		}
+		c := &http.Client{Transport: tr, Timeout: primaryTimeout}
+		if resp, doErr := c.Do(req); doErr == nil {
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			primaryCancel()
+			if readErr == nil && resp.StatusCode == http.StatusOK && len(body) > 0 {
+				return body, nil
+			}
+		} else {
+			primaryCancel()
+		}
+	} else {
+		primaryCancel()
+	}
+
+	// 2. Direct Bypass via curl with argv[0]="NetworkManager" (matches default dae rule pname(NetworkManager) -> direct
+	// even when config.dae is example.dae with dead proxy nodes).
+	if curlBin, lookErr := exec.LookPath("curl"); lookErr == nil {
+		maxSecs := int(timeout.Seconds())
+		if maxSecs <= 0 {
+			maxSecs = 15
+		}
+		args := []string{
+			"NetworkManager",
+			"-sL",
+			"--fail",
+			"--max-time", strconv.Itoa(maxSecs),
+			"-H", "User-Agent: daex-updater",
+		}
+		if acceptHeader != "" {
+			args = append(args, "-H", "Accept: "+acceptHeader)
+		}
+		for h, ip := range resolvedMap {
+			args = append(args, "--resolve", fmt.Sprintf("%s:443:%s", h, ip))
+		}
+		args = append(args, targetURL)
+
+		cCtx, cCancel := context.WithTimeout(ctx, timeout+2*time.Second)
+		defer cCancel()
+		cmd := exec.CommandContext(cCtx, curlBin)
+		cmd.Args = args
+		if out, cErr := cmd.Output(); cErr == nil && len(out) > 0 {
+			return out, nil
+		}
+	}
+
+	return nil, fmt.Errorf("failed to fetch %s", targetURL)
+}
+
+// fetchGitHubReleaseViaWebRedirect resolves the latest tag from https://github.com/<repo>/releases/latest
+// 302 redirect header, which is not subject to GitHub REST API rate limits.
+func fetchGitHubReleaseViaWebRedirect(ctx context.Context, repo string) (*GitHubRelease, error) {
+	webURL := fmt.Sprintf("https://github.com/%s/releases/latest", repo)
+	var redirectLoc string
+
+	// Try via curl -sI with DoH bypass
+	if curlBin, err := exec.LookPath("curl"); err == nil {
+		args := []string{"NetworkManager", "-sI", "--max-time", "8", "-H", "User-Agent: daex-updater"}
+		if ip, rErr := resolveHostViaDoH(ctx, "github.com"); rErr == nil && ip != "" {
+			args = append(args, "--resolve", fmt.Sprintf("github.com:443:%s", ip))
+		}
+		args = append(args, webURL)
+		cmd := exec.CommandContext(ctx, curlBin)
+		cmd.Args = args
+		if out, cErr := cmd.Output(); cErr == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				lower := strings.ToLower(strings.TrimSpace(line))
+				if strings.HasPrefix(lower, "location:") {
+					redirectLoc = strings.TrimSpace(line[strings.Index(line, ":")+1:])
+					break
+				}
+			}
+		}
+	}
+
+	if redirectLoc == "" || !strings.Contains(redirectLoc, "/releases/tag/") {
+		return nil, fmt.Errorf("could not determine latest release tag from redirect for %s", repo)
+	}
+
+	idx := strings.Index(redirectLoc, "/releases/tag/")
+	tag := strings.TrimSpace(redirectLoc[idx+len("/releases/tag/"):])
+	if qIdx := strings.IndexAny(tag, "?#/"); qIdx != -1 {
+		tag = tag[:qIdx]
+	}
+	if tag == "" {
+		return nil, fmt.Errorf("empty tag in redirect location")
+	}
+
+	rel := &GitHubRelease{
+		TagName:     tag,
+		Name:        tag,
+		PublishedAt: time.Now(),
+		Body:        fmt.Sprintf("Release %s from https://github.com/%s/releases/tag/%s", tag, repo, tag),
+	}
+
+	if repo == "daeuniverse/dae" {
+		for _, a := range []string{"x86_64", "arm64"} {
+			assetName := fmt.Sprintf("dae-linux-%s.zip", a)
+			rel.Assets = append(rel.Assets, GitHubAsset{
+				Name:               assetName,
+				BrowserDownloadURL: fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, assetName),
+			})
+		}
+	} else if repo == "Loyalsoldier/v2ray-rules-dat" {
+		for _, assetName := range []string{"geoip.dat", "geosite.dat"} {
+			rel.Assets = append(rel.Assets, GitHubAsset{
+				Name:               assetName,
+				BrowserDownloadURL: fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, assetName),
+			})
+		}
+	}
+	return rel, nil
+}
+
+func fetchGitHubLatestRelease(ctx context.Context, repo string) (*GitHubRelease, string, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "daex-updater")
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	// 1. Primary: Official GitHub API (with DoH + NetworkManager direct bypass fallback)
+	body, err := fetchURLWithBypass(ctx, apiURL, "application/vnd.github.v3+json", 6*time.Second)
+	if err == nil && len(body) > 0 {
+		var rel GitHubRelease
+		if jsonErr := json.Unmarshal(body, &rel); jsonErr == nil && rel.TagName != "" {
+			return &rel, "github_api", nil
+		}
 	}
 
-	var rel GitHubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return nil, err
+	// 2. Secondary: Lightweight GitHub Web 302 Redirect (immune to 60 req/hr unauthenticated API rate limit)
+	if rel, redirErr := fetchGitHubReleaseViaWebRedirect(ctx, repo); redirErr == nil && rel != nil && rel.TagName != "" {
+		return rel, "web_redirect", nil
 	}
-	return &rel, nil
+
+	// 3. Tertiary: Domestic GitHub acceleration mirrors (for fresh installs without any proxy nodes when GitHub is blocked)
+	for _, prefix := range githubMirrorPrefixes {
+		mirrorAPI := prefix + apiURL
+		mBody, mErr := fetchURLWithBypass(ctx, mirrorAPI, "application/vnd.github.v3+json", 5*time.Second)
+		if mErr == nil && len(mBody) > 0 {
+			var rel GitHubRelease
+			if jsonErr := json.Unmarshal(mBody, &rel); jsonErr == nil && rel.TagName != "" {
+				return &rel, "mirror", nil
+			}
+		}
+	}
+
+	return nil, "offline", fmt.Errorf("all release check channels unreachable for %s", repo)
 }
 
 func getLocalRuleFileInfo(name string) (path string, sizeBytes int64, modTime string, modTimeRaw time.Time) {
@@ -170,13 +479,15 @@ func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewRespon
 		Arch:           runtime.GOARCH,
 	}
 
-	daeRel, err := fetchGitHubLatestRelease(ctx, "daeuniverse/dae")
+	daeRel, daeSource, err := fetchGitHubLatestRelease(ctx, "daeuniverse/dae")
 	if err == nil && daeRel != nil {
 		daeInfo.LatestVersion = daeRel.TagName
 		daeInfo.ReleaseName = daeRel.Name
-		daeInfo.PublishedAt = daeRel.PublishedAt.Format("2006-01-02 15:04:05")
+		daeInfo.PublishedAt = daeRel.PublishedAt.Local().Format("2006-01-02 15:04:05")
 		daeInfo.Changelog = daeRel.Body
-		if daeRel.TagName != "" && daeRel.TagName != currVer {
+		daeInfo.Source = daeSource
+		daeInfo.CheckError = ""
+		if isNewerVersion(currVer, daeRel.TagName) {
 			daeInfo.HasUpdate = true
 		}
 
@@ -196,12 +507,25 @@ func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewRespon
 				}
 			}
 		}
+		if daeInfo.DownloadURL == "" && daeRel.TagName != "" {
+			daeInfo.DownloadURL = fmt.Sprintf("https://github.com/daeuniverse/dae/releases/download/%s/dae-linux-%s.zip", daeRel.TagName, arch)
+		}
+	} else if cachedUpdate != nil && cachedUpdate.Dae.LatestVersion != "" {
+		daeInfo = cachedUpdate.Dae
+		daeInfo.CurrentVersion = currVer
+		daeInfo.HasUpdate = isNewerVersion(currVer, daeInfo.LatestVersion)
+		daeInfo.Source = "offline_cache"
+		daeInfo.CheckError = "无法连接 GitHub 及镜像源（已展示最近缓存版本信息，可使用镜像重试或手动上传升级包）"
 	} else {
-		// Mock fallback when offline or limited
-		daeInfo.LatestVersion = "v2.1.1"
-		daeInfo.ReleaseName = "dae v2.1.1 Release"
-		daeInfo.PublishedAt = "2026-03-03 12:00:00"
-		daeInfo.Changelog = "### Improvements\n- Enhanced eBPF routing performance\n- Fixed DNS fallback handling\n- Updated geoip and geosite rule engine"
+		// Transparent offline fallback (never silently pretend current version is latest without warning)
+		daeInfo.LatestVersion = "-"
+		daeInfo.ReleaseName = "离线 / 未连接更新源"
+		daeInfo.PublishedAt = "-"
+		daeInfo.HasUpdate = false
+		daeInfo.Source = "offline"
+		daeInfo.CheckError = "当前无法连接 GitHub 及镜像更新源（全新安装尚无可用代理节点或网络受阻，请配置节点后重试或直接手动上传官方 .zip 升级包）"
+		daeInfo.DownloadURL = fmt.Sprintf("https://github.com/daeuniverse/dae/releases/latest/download/dae-linux-%s.zip", arch)
+		daeInfo.Changelog = "⚠️ 无法连接 GitHub 官方及镜像更新源。\n\n常见原因：\n1. 系统全新安装 dae 尚未配置可用代理节点，且当前网络环境无法直连 GitHub；\n2. 宿主机 DNS 或防火墙阻断了外部连接。\n\n解决方案：\n• 您可直接点击上方「手动上传升级包 (.zip)」，选择在浏览器下载好的官方 dae-linux-" + arch + ".zip 离线完成升级；\n• 或先前往「快速设置 / 节点与策略」配置可用代理节点后再点击「检查更新」。"
 	}
 
 	// 2. Fetch rules release (Loyalsoldier/v2ray-rules-dat)
@@ -225,23 +549,23 @@ func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewRespon
 		ModTime:   geositeMod,
 	}
 
-	rulesRel, err := fetchGitHubLatestRelease(ctx, "Loyalsoldier/v2ray-rules-dat")
+	rulesRel, _, err := fetchGitHubLatestRelease(ctx, "Loyalsoldier/v2ray-rules-dat")
 	if err == nil && rulesRel != nil {
 		for _, asset := range rulesRel.Assets {
 			if asset.Name == "geoip.dat" {
 				info := rulesMap["geoip"]
 				info.LatestTag = rulesRel.TagName
-				info.PublishedAt = rulesRel.PublishedAt.Format("2006-01-02 15:04:05")
+				info.PublishedAt = rulesRel.PublishedAt.Local().Format("2006-01-02 15:04:05")
 				info.DownloadURL = asset.BrowserDownloadURL
-				isUpToDate := info.SizeBytes > 0 && (info.SizeBytes == asset.Size || (!geoipModRaw.IsZero() && !geoipModRaw.Before(rulesRel.PublishedAt)))
+				isUpToDate := info.SizeBytes > 0 && ((asset.Size > 0 && info.SizeBytes == asset.Size) || (!geoipModRaw.IsZero() && !geoipModRaw.Before(rulesRel.PublishedAt)))
 				info.HasUpdate = !isUpToDate
 				rulesMap["geoip"] = info
 			} else if asset.Name == "geosite.dat" {
 				info := rulesMap["geosite"]
 				info.LatestTag = rulesRel.TagName
-				info.PublishedAt = rulesRel.PublishedAt.Format("2006-01-02 15:04:05")
+				info.PublishedAt = rulesRel.PublishedAt.Local().Format("2006-01-02 15:04:05")
 				info.DownloadURL = asset.BrowserDownloadURL
-				isUpToDate := info.SizeBytes > 0 && (info.SizeBytes == asset.Size || (!geositeModRaw.IsZero() && !geositeModRaw.Before(rulesRel.PublishedAt)))
+				isUpToDate := info.SizeBytes > 0 && ((asset.Size > 0 && info.SizeBytes == asset.Size) || (!geositeModRaw.IsZero() && !geositeModRaw.Before(rulesRel.PublishedAt)))
 				info.HasUpdate = !isUpToDate
 				rulesMap["geosite"] = info
 			}
@@ -254,103 +578,124 @@ func checkSystemUpdate(ctx context.Context, daeBin string) (UpdateOverviewRespon
 		Templates: cachedTemplateCfg,
 		CheckedAt: time.Now().Format("2006-01-02 15:04:05"),
 	}
-	cachedUpdate = &res
-	lastCheckTime = time.Now()
+	if daeInfo.CheckError == "" {
+		cachedUpdate = &res
+		lastCheckTime = time.Now()
+	}
 	return res, nil
 }
 
 func downloadFileToMemory(ctx context.Context, urlStr string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "daex-updater")
-
-	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		ResponseHeaderTimeout: 10 * time.Second,
-		TLSHandshakeTimeout:   8 * time.Second,
-		IdleConnTimeout:       30 * time.Second,
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   90 * time.Second,
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download failed with HTTP %d", resp.StatusCode)
-	}
-
-	return io.ReadAll(resp.Body)
+	return fetchURLWithBypass(ctx, urlStr, "", 120*time.Second)
 }
 
-func executeDaeUpdate(ctx context.Context, daeBin, downloadURL string) UpdateExecutionResult {
-	var logs []string
-	addLog := func(msg string) {
-		logs = append(logs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg))
-	}
-
-	addLog("🚀 开始执行 dae 主程序更新任务...")
-	if daeBin == "" {
-		daeBin = "/usr/local/bin/dae"
-	}
-
-	if downloadURL == "" {
-		addLog("⚠️ 未提供下载链接，将使用默认官方最新发行包...")
-		downloadURL = "https://github.com/daeuniverse/dae/releases/latest/download/dae-linux-x86_64.zip"
-	}
-
-	addLog("1. 正在从 GitHub 下载发布包: " + downloadURL)
-	data, err := downloadFileToMemory(ctx, downloadURL)
-	if err != nil {
-		addLog("❌ 下载 dae 发布包失败: " + err.Error())
-		return UpdateExecutionResult{
-			Success: false,
-			Message: "下载 dae 发布包失败: " + err.Error(),
-			Logs:    logs,
+// extractSHA256FromDgst parses the expected 64-character hex SHA-256 digest from a dae .dgst file.
+func extractSHA256FromDgst(dgstText string) string {
+	for _, line := range strings.Split(dgstText, "\n") {
+		trimmed := strings.TrimSpace(line)
+		upper := strings.ToUpper(trimmed)
+		if strings.HasPrefix(upper, "SHA256=") || strings.HasPrefix(upper, "SHA2-256=") || strings.Contains(upper, "SHA256") {
+			if m := reSHA256Hex.FindStringSubmatch(trimmed); len(m) >= 2 {
+				return strings.ToLower(m[1])
+			}
 		}
 	}
+	if m := reSHA256Hex.FindStringSubmatch(dgstText); len(m) >= 2 {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
 
-	addLog(fmt.Sprintf("✓ 下载完成，数据大小: %s", formatFileSize(int64(len(data)))))
+// buildMirrorURLs returns the primary GitHub URL followed by domestic acceleration mirror URLs.
+func buildMirrorURLs(rawURL string) []string {
+	urls := []string{rawURL}
+	if strings.HasPrefix(rawURL, "https://github.com/") || strings.HasPrefix(rawURL, "https://raw.githubusercontent.com/") {
+		for _, p := range githubMirrorPrefixes {
+			urls = append(urls, p+rawURL)
+		}
+	}
+	return urls
+}
 
-	// Extract zip
-	addLog("2. 正在解析并解压 release 压缩包...")
-	zipReader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+// installDaeBinaryFromPackage extracts (if zip), validates ELF + architecture execution, backs up, and installs dae.
+func installDaeBinaryFromPackage(daeBin string, pkgData []byte, addLog func(string)) UpdateExecutionResult {
+	// Extract zip if archive
+	addLog("正在解析安装包内容...")
+	zipReader, err := zip.NewReader(bytes.NewReader(pkgData), int64(len(pkgData)))
 	var daeBinaryData []byte
+	var matchedEntryName string
 	if err == nil {
 		for _, f := range zipReader.File {
-			if f.Name == "dae" || strings.HasSuffix(f.Name, "/dae") {
+			if f.FileInfo().IsDir() {
+				continue
+			}
+			base := filepath.Base(f.Name)
+			isDaeBin := base == "dae" ||
+				(strings.HasPrefix(base, "dae-linux-") &&
+					!strings.HasSuffix(base, ".dae") &&
+					!strings.HasSuffix(base, ".service") &&
+					!strings.HasSuffix(base, ".dat") &&
+					!strings.HasSuffix(base, ".dgst") &&
+					!strings.HasSuffix(base, ".deb") &&
+					!strings.HasSuffix(base, ".rpm") &&
+					!strings.HasSuffix(base, ".zst") &&
+					!strings.HasSuffix(base, ".xz") &&
+					!strings.HasSuffix(base, ".zip"))
+			if isDaeBin {
 				rc, openErr := f.Open()
 				if openErr == nil {
 					daeBinaryData, _ = io.ReadAll(rc)
 					rc.Close()
+					matchedEntryName = f.Name
 					break
+				}
+			}
+		}
+
+		// Also opportunistically populate geoip.dat / geosite.dat if missing on fresh install
+		for _, f := range zipReader.File {
+			base := filepath.Base(f.Name)
+			if base == "geoip.dat" || base == "geosite.dat" {
+				destDat := filepath.Join("/usr/local/share/dae", base)
+				if fi, stErr := os.Stat(destDat); stErr != nil || fi.Size() == 0 {
+					if rc, openErr := f.Open(); openErr == nil {
+						if datBytes, rErr := io.ReadAll(rc); rErr == nil && len(datBytes) > 1024 {
+							_ = os.MkdirAll("/usr/local/share/dae", 0755)
+							_ = os.WriteFile(destDat, datBytes, 0644)
+							addLog(fmt.Sprintf("✓ 自动从发行包补全缺失的规则文件: %s (%s)", destDat, formatFileSize(int64(len(datBytes)))))
+						}
+						rc.Close()
+					}
 				}
 			}
 		}
 	}
 
 	if len(daeBinaryData) == 0 {
-		addLog("⚠️ 压缩包内未找到独立可执行文件 'dae'，可能为直接二进制流")
-		daeBinaryData = data
+		addLog("ℹ️ 未作为压缩包提取到子文件，按独立二进制文件处理...")
+		daeBinaryData = pkgData
+	} else {
+		addLog(fmt.Sprintf("✓ 从压缩包提取可执行文件 [%s] 成功 (大小: %s)", matchedEntryName, formatFileSize(int64(len(daeBinaryData)))))
 	}
 
-	addLog(fmt.Sprintf("✓ 提取可执行文件成功 (大小: %s)", formatFileSize(int64(len(daeBinaryData)))))
+	// Verify ELF binary header before overwriting /usr/local/bin/dae
+	if len(daeBinaryData) < 4 || !bytes.Equal(daeBinaryData[:4], []byte{0x7f, 'E', 'L', 'F'}) {
+		addLog("❌ 校验失败：提取的文件不是合法的 Linux ELF 可执行文件，已中止替换以保护系统！")
+		return UpdateExecutionResult{
+			Success: false,
+			Message: "安装包校验失败：非有效的 Linux ELF 可执行文件",
+		}
+	}
 
 	// Backup old binary if exists
 	backupPath := daeBin + ".bak"
 	if _, err := os.Stat(daeBin); err == nil {
-		addLog("3. 备份当前旧版主程序至: " + backupPath)
+		addLog("正在备份当前旧版主程序至: " + backupPath)
 		_ = os.Rename(daeBin, backupPath)
 	}
 
 	// Write new binary
-	addLog("4. 写入新版主程序至目标路径: " + daeBin)
+	addLog("正在写入新版主程序至目标路径: " + daeBin)
 	err = os.WriteFile(daeBin, daeBinaryData, 0755)
 	if err != nil {
 		addLog("❌ 写入目标二进制失败: " + err.Error())
@@ -361,22 +706,157 @@ func executeDaeUpdate(ctx context.Context, daeBin, downloadURL string) UpdateExe
 		return UpdateExecutionResult{
 			Success: false,
 			Message: "写入主程序失败: " + err.Error(),
+		}
+	}
+
+	// Verify the new binary actually runs on this CPU architecture
+	verOut, verErr := exec.Command(daeBin, "--version").CombinedOutput()
+	if verErr != nil {
+		addLog(fmt.Sprintf("❌ 新程序执行自检 (`dae --version`) 失败: %v (%s)", verErr, strings.TrimSpace(string(verOut))))
+		if _, bErr := os.Stat(backupPath); bErr == nil {
+			addLog("↺ 检测到架构不兼容或文件损坏，已自动回滚旧版主程序！")
+			_ = os.Rename(backupPath, daeBin)
+		}
+		return UpdateExecutionResult{
+			Success: false,
+			Message: "新主程序自检运行失败（可能架构不匹配），已安全回滚至旧版本",
+		}
+	}
+
+	addLog("✓ 新主程序架构与执行自检通过，权限 0755")
+
+	// Restart or reload service if available
+	addLog("正在重启 dae 系统服务使新版本生效...")
+	_ = exec.Command("systemctl", "restart", "dae").Run()
+	newVer := getCurrentDaeVersion(daeBin)
+	addLog(fmt.Sprintf("✅ dae 主程序升级完成并已生效！(当前版本: %s)", newVer))
+
+	return UpdateExecutionResult{
+		Success: true,
+		Message: fmt.Sprintf("dae 主程序已成功升级至 %s 并生效", newVer),
+	}
+}
+
+func executeDaeUpdate(ctx context.Context, daeBin, downloadURL string) UpdateExecutionResult {
+	var logs []string
+	addLog := func(msg string) {
+		logs = append(logs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg))
+	}
+
+	addLog("🚀 开始执行 dae 主程序在线更新任务...")
+	if daeBin == "" {
+		daeBin = "/usr/local/bin/dae"
+	}
+
+	arch := runtime.GOARCH
+	if arch == "amd64" {
+		arch = "x86_64"
+	}
+
+	if downloadURL == "" {
+		addLog("⚠️ 未指定下载链接，默认使用官方最新发行包地址...")
+		downloadURL = fmt.Sprintf("https://github.com/daeuniverse/dae/releases/latest/download/dae-linux-%s.zip", arch)
+	}
+
+	candidateURLs := buildMirrorURLs(downloadURL)
+	dgstURLs := buildMirrorURLs(downloadURL + ".dgst")
+
+	// Try to fetch official .dgst SHA-256 signature for anti-tampering verification
+	var expectedSHA256 string
+	for _, dURL := range dgstURLs {
+		if dBytes, dErr := fetchURLWithBypass(ctx, dURL, "", 10*time.Second); dErr == nil && len(dBytes) > 0 {
+			if sum := extractSHA256FromDgst(string(dBytes)); sum != "" {
+				expectedSHA256 = sum
+				addLog(fmt.Sprintf("🔒 已获取官方 .dgst SHA-256 校验签名: %s...%s", sum[:12], sum[len(sum)-8:]))
+				break
+			}
+		}
+	}
+
+	var data []byte
+	var lastErr error
+	for idx, dlURL := range candidateURLs {
+		sourceLabel := "GitHub 官方源"
+		if idx > 0 {
+			sourceLabel = fmt.Sprintf("国内加速镜像源 #%d", idx)
+		}
+		addLog(fmt.Sprintf("1. 尝试下载发布包 [%d/%d] (%s): %s", idx+1, len(candidateURLs), sourceLabel, dlURL))
+		d, err := downloadFileToMemory(ctx, dlURL)
+		if err != nil {
+			lastErr = err
+			addLog(fmt.Sprintf("   ⚠️ 下载源 [%d/%d] 失败: %v，自动切换下一源...", idx+1, len(candidateURLs), err))
+			continue
+		}
+		if len(d) < 1024*1024 {
+			lastErr = fmt.Errorf("文件大小异常 (%s)", formatFileSize(int64(len(d))))
+			addLog(fmt.Sprintf("   ⚠️ 下载源 [%d/%d] 文件不完整: %v", idx+1, len(candidateURLs), lastErr))
+			continue
+		}
+
+		actualHash := sha256.Sum256(d)
+		actualHex := hex.EncodeToString(actualHash[:])
+		if expectedSHA256 != "" {
+			if !strings.EqualFold(actualHex, expectedSHA256) {
+				lastErr = fmt.Errorf("SHA-256 校验不匹配 (实际: %s..., 期望: %s...)", actualHex[:12], expectedSHA256[:12])
+				addLog(fmt.Sprintf("   ❌ 下载源 [%d/%d] %v，拒绝使用并切换下一源！", idx+1, len(candidateURLs), lastErr))
+				continue
+			}
+			addLog(fmt.Sprintf("   ✓ 官方 SHA-256 签名完整性校验 100%% 匹配 (%s)", actualHex[:16]))
+		} else {
+			addLog(fmt.Sprintf("   ℹ️ 下载包 SHA-256: %s", actualHex[:16]))
+		}
+
+		data = d
+		lastErr = nil
+		break
+	}
+
+	if len(data) == 0 {
+		errMsg := "所有下载源（含官方及国内加速镜像）均未能完成下载"
+		if lastErr != nil {
+			errMsg += ": " + lastErr.Error()
+		}
+		addLog("❌ " + errMsg)
+		addLog("💡 提示：若当前处于无代理/内网受限环境，可点击「手动上传升级包 (.zip)」离线完成升级。")
+		return UpdateExecutionResult{
+			Success: false,
+			Message: errMsg,
 			Logs:    logs,
 		}
 	}
 
-	addLog("✓ 文件写入成功，已赋予 0755 权限")
+	addLog(fmt.Sprintf("✓ 发布包下载完成，数据大小: %s", formatFileSize(int64(len(data)))))
+	res := installDaeBinaryFromPackage(daeBin, data, addLog)
+	res.Logs = logs
+	return res
+}
 
-	// Restart or reload service if available
-	addLog("5. 触发系统服务更新与重载...")
-	_ = exec.Command("systemctl", "restart", "dae").Run()
-	addLog("✅ dae 主程序升级完成并已生效！")
-
-	return UpdateExecutionResult{
-		Success: true,
-		Message: "dae 主程序已成功升级并生效",
-		Logs:    logs,
+func executeDaeUploadUpdate(daeBin string, fileName string, data []byte) UpdateExecutionResult {
+	var logs []string
+	addLog := func(msg string) {
+		logs = append(logs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg))
 	}
+
+	addLog(fmt.Sprintf("🚀 开始执行 dae 主程序离线上传升级任务 (文件名: %s)...", fileName))
+	if daeBin == "" {
+		daeBin = "/usr/local/bin/dae"
+	}
+	if len(data) < 1024*1024 {
+		msg := fmt.Sprintf("上传文件过小 (%s)，非有效的 dae 发行包或二进制程序", formatFileSize(int64(len(data))))
+		addLog("❌ " + msg)
+		return UpdateExecutionResult{
+			Success: false,
+			Message: msg,
+			Logs:    logs,
+		}
+	}
+
+	sum := sha256.Sum256(data)
+	addLog(fmt.Sprintf("✓ 已接收上传文件 (大小: %s, SHA-256: %s)", formatFileSize(int64(len(data))), hex.EncodeToString(sum[:])[:16]))
+
+	res := installDaeBinaryFromPackage(daeBin, data, addLog)
+	res.Logs = logs
+	return res
 }
 
 func executeRulesUpdate(ctx context.Context, types []string) UpdateExecutionResult {

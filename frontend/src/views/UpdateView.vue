@@ -20,6 +20,7 @@ import {
   ListFilter,
   Globe,
   ExternalLink,
+  Upload,
   X
 } from 'lucide-vue-next'
 import { t } from '../composables/useSettings'
@@ -33,6 +34,8 @@ interface DaeInfo {
   changelog: string
   downloadUrl: string
   arch: string
+  source?: string
+  checkError?: string
 }
 
 interface RuleItem {
@@ -70,6 +73,8 @@ interface UpdateOverview {
 
 const loading = ref(true)
 const updatingDae = ref(false)
+const uploadingDae = ref(false)
+const daeFileInput = ref<HTMLInputElement | null>(null)
 const updatingRules = ref(false)
 const updatingSingleRule = ref<string | null>(null)
 const updatingTemplates = ref(false)
@@ -91,7 +96,7 @@ const templateMeta = ref({
 const overview = ref<UpdateOverview>({
   dae: {
     currentVersion: 'v2.1.1',
-    latestVersion: 'v2.1.1',
+    latestVersion: 'v2.1.2',
     hasUpdate: false,
     releaseName: '',
     publishedAt: '',
@@ -162,12 +167,61 @@ async function triggerDaeUpdate() {
       if (result.logs && Array.isArray(result.logs)) {
         executionLogs.value = result.logs
       }
+      listUpdateError.value = !result.success
+      listUpdateNotification.value = result.message || (result.success ? 'dae 主程序升级成功' : 'dae 主程序升级失败')
+      setTimeout(() => {
+        listUpdateNotification.value = null
+      }, 7000)
       await fetchUpdateCheck()
     }
   } catch (e: any) {
     executionLogs.value.push(t('update.log_req_failed', { error: e?.message || e }))
   } finally {
     updatingDae.value = false
+  }
+}
+
+function triggerDaeUploadSelect() {
+  if (uploadingDae.value || updatingDae.value) return
+  daeFileInput.value?.click()
+}
+
+async function handleDaeFileUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  input.value = ''
+
+  uploadingDae.value = true
+  executionLogs.value = [
+    `[${new Date().toLocaleTimeString()}] 🚀 正在上传本地安装包: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`
+  ]
+
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch('/api/update/dae/upload', {
+      method: 'POST',
+      body: formData
+    })
+    const result = await res.json()
+    if (result.logs && Array.isArray(result.logs)) {
+      executionLogs.value = result.logs
+    }
+    listUpdateError.value = !result.success
+    listUpdateNotification.value = result.message || (result.success ? 'dae 离线安装包升级成功' : 'dae 离线安装包升级失败')
+    setTimeout(() => {
+      listUpdateNotification.value = null
+    }, 7000)
+    if (result.success) {
+      await fetchUpdateCheck()
+    }
+  } catch (e: any) {
+    listUpdateError.value = true
+    listUpdateNotification.value = t('update.log_req_failed', { error: e?.message || e })
+    executionLogs.value.push(t('update.log_req_failed', { error: e?.message || e }))
+  } finally {
+    uploadingDae.value = false
   }
 }
 
@@ -354,10 +408,29 @@ onMounted(() => {
             <h3>{{ t('update.dae.card_title') }}</h3>
           </div>
 
-          <div class="status-badge" :class="{ update: overview.dae.hasUpdate, latest: !overview.dae.hasUpdate }">
-            <component :is="overview.dae.hasUpdate ? AlertCircle : CheckCircle2" :size="14" />
-            <span>{{ overview.dae.hasUpdate ? t('update.dae.has_update') : t('update.dae.is_latest') }}</span>
+          <div class="status-badge-group">
+            <span v-if="overview.dae.source && overview.dae.source !== 'offline' && overview.dae.source !== 'offline_cache'" class="source-pill">
+              <ShieldCheck :size="12" />
+              <span>{{ overview.dae.source === 'mirror' ? t('update.dae.source_mirror') : (overview.dae.source === 'web_redirect' ? t('update.dae.source_redirect') : t('update.dae.source_api')) }}</span>
+            </span>
+
+            <div
+              class="status-badge"
+              :class="{
+                update: overview.dae.hasUpdate,
+                offline: !overview.dae.hasUpdate && !!overview.dae.checkError,
+                latest: !overview.dae.hasUpdate && !overview.dae.checkError
+              }"
+            >
+              <component :is="(overview.dae.hasUpdate || overview.dae.checkError) ? AlertCircle : CheckCircle2" :size="14" />
+              <span>{{ overview.dae.hasUpdate ? t('update.dae.has_update') : (overview.dae.checkError ? t('update.dae.offline') : t('update.dae.is_latest')) }}</span>
+            </div>
           </div>
+        </div>
+
+        <div v-if="overview.dae.checkError" class="check-error-banner">
+          <AlertCircle :size="15" />
+          <span>{{ overview.dae.checkError }}</span>
         </div>
 
         <!-- Metric Grid -->
@@ -389,12 +462,29 @@ onMounted(() => {
         <div class="card-action-bar">
           <button
             class="btn-upgrade"
-            :disabled="updatingDae"
+            :disabled="updatingDae || uploadingDae"
             @click="triggerDaeUpdate"
           >
             <DownloadCloud :size="14" :class="{ spin: updatingDae }" />
             <span>{{ updatingDae ? t('update.dae.upgrading') : t('update.dae.upgrade_btn') }}</span>
           </button>
+
+          <button
+            class="action-btn secondary"
+            :disabled="updatingDae || uploadingDae"
+            @click="triggerDaeUploadSelect"
+          >
+            <Upload :size="14" :class="{ spin: uploadingDae }" />
+            <span>{{ uploadingDae ? t('update.dae.uploading') : t('update.dae.upload_btn') }}</span>
+          </button>
+
+          <input
+            ref="daeFileInput"
+            type="file"
+            accept=".zip,application/zip,application/octet-stream"
+            style="display: none"
+            @change="handleDaeFileUpload"
+          />
         </div>
 
         <!-- Changelog Accordion -->
@@ -797,6 +887,24 @@ onMounted(() => {
   color: #a855f7;
 }
 
+.status-badge-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  background: rgba(2, 132, 199, 0.14);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -813,6 +921,22 @@ onMounted(() => {
 .status-badge.update {
   background: rgba(245, 158, 11, 0.15);
   color: #f59e0b;
+}
+.status-badge.offline {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.check-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  font-size: 12px;
 }
 
 /* Meta Grid */
@@ -851,6 +975,8 @@ onMounted(() => {
 .card-action-bar {
   display: flex;
   align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .btn-upgrade {
