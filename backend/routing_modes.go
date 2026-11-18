@@ -628,18 +628,28 @@ func handleTestRoutingMode(o Options) http.HandlerFunc {
 			return
 		}
 
-		// Perform live probe variations on test results
+		// Perform real live HTTP probes on each test item
 		updatedTests := make([]FastTestItem, len(mode.TestResults))
+		var wg sync.WaitGroup
 		for i, t := range mode.TestResults {
-			item := t
-			// Small realistic latency variation
-			delta := rand.Intn(7) - 3
-			item.Latency = item.Latency + delta
-			if item.Latency < 2 {
-				item.Latency = 2
-			}
-			updatedTests[i] = item
+			wg.Add(1)
+			go func(idx int, item FastTestItem) {
+				defer wg.Done()
+				probe := testSingleTarget(ConnectivityTarget{
+					ID:          item.ID,
+					Name:        item.Name,
+					Category:    item.Category,
+					Url:         item.Url,
+					ExpectedOut: item.ExpectedOut,
+				})
+				item.Status = probe.Status
+				item.Latency = probe.Latency
+				item.HttpCode = probe.HttpCode
+				item.Message = probe.Message
+				updatedTests[idx] = item
+			}(i, t)
 		}
+		wg.Wait()
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":          true,

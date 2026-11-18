@@ -70,10 +70,10 @@ const connectivityList = ref<ConnectivityItem[]>([
     category: '国内直连',
     url: 'https://www.aliyun.com',
     expectedOut: '国内直连',
-    status: 'ok',
-    latency: 18,
-    httpCode: 200,
-    message: '国内高速骨干网直连畅通'
+    status: 'pending',
+    latency: -1,
+    httpCode: 0,
+    message: '等待真实连通检测'
   },
   {
     id: 'google',
@@ -81,10 +81,10 @@ const connectivityList = ref<ConnectivityItem[]>([
     category: '国际搜索',
     url: 'https://www.google.com/generate_204',
     expectedOut: '海外代理',
-    status: 'ok',
-    latency: 64,
-    httpCode: 204,
-    message: '海外代理链路畅通'
+    status: 'pending',
+    latency: -1,
+    httpCode: 0,
+    message: '等待真实连通检测'
   },
   {
     id: 'github',
@@ -92,10 +92,10 @@ const connectivityList = ref<ConnectivityItem[]>([
     category: '开发者服务',
     url: 'https://github.com',
     expectedOut: '海外代理',
-    status: 'ok',
-    latency: 82,
-    httpCode: 200,
-    message: 'Git 代码托管与网页访问正常'
+    status: 'pending',
+    latency: -1,
+    httpCode: 0,
+    message: '等待真实连通检测'
   },
   {
     id: 'youtube',
@@ -103,10 +103,10 @@ const connectivityList = ref<ConnectivityItem[]>([
     category: '流媒体服务',
     url: 'https://www.youtube.com/generate_204',
     expectedOut: '海外代理',
-    status: 'ok',
-    latency: 71,
-    httpCode: 204,
-    message: '流媒体视频 CDN 连通良好'
+    status: 'pending',
+    latency: -1,
+    httpCode: 0,
+    message: '等待真实连通检测'
   },
   {
     id: 'openai',
@@ -114,12 +114,22 @@ const connectivityList = ref<ConnectivityItem[]>([
     category: 'AI 大模型',
     url: 'https://api.openai.com/v1/models',
     expectedOut: '原生解锁',
-    status: 'ok',
-    latency: 108,
-    httpCode: 200,
-    message: 'API 接口正常，原生节点已解锁'
+    status: 'pending',
+    latency: -1,
+    httpCode: 0,
+    message: '等待真实连通检测'
   }
 ])
+
+const readyNodesCount = computed(() => {
+  const list: NodeItem[] = dashboardData.value?.nodes || []
+  return list.filter(n => n.latency > 0).length
+})
+
+const activeNodesCount = computed(() => {
+  const list: NodeItem[] = dashboardData.value?.nodes || []
+  return list.filter(n => n.active && n.latency > 0).length
+})
 
 const testingTargets = ref<Record<string, boolean>>({})
 const testingAll = ref(false)
@@ -445,10 +455,10 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="metric-value">
-          {{ dashboardData?.nodes?.length || 0 }} <span class="unit">{{ t('dashboard.unit_nodes') }}</span>
+          {{ readyNodesCount }} / {{ dashboardData?.nodes?.length || 0 }} <span class="unit">{{ t('dashboard.unit_nodes') }}</span>
         </div>
         <div class="metric-sub">
-          {{ t('dashboard.active_outbounds', { count: 2 }) }}
+          {{ t('dashboard.active_outbounds', { count: activeNodesCount }) }}
         </div>
       </div>
     </section>
@@ -554,14 +564,25 @@ onUnmounted(() => {
               <!-- Latency Pill -->
               <span
                 class="latency-badge"
+                :title="item.message"
                 :class="{
-                  fast: item.latency < 50,
-                  medium: item.latency >= 50 && item.latency < 100,
-                  slow: item.latency >= 100
+                  pending: item.status === 'pending',
+                  unreachable: item.status !== 'pending' && (item.status === 'error' || item.latency <= 0),
+                  fast: item.status === 'ok' && item.latency > 0 && item.latency < 80,
+                  medium: item.status === 'ok' && item.latency >= 80 && item.latency < 200,
+                  slow: item.status === 'ok' && item.latency >= 200
                 }"
               >
                 <span class="dot"></span>
-                {{ item.latency }} ms
+                <template v-if="item.status === 'pending'">
+                  {{ t('quick.quality_pending') }}
+                </template>
+                <template v-else-if="item.status === 'error' || item.latency <= 0">
+                  {{ t('quick.quality_fail') }}
+                </template>
+                <template v-else>
+                  {{ item.latency }} ms
+                </template>
               </span>
 
               <!-- Test Button (Icon button) -->
@@ -607,12 +628,13 @@ onUnmounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="node in dashboardData?.nodes" :key="node.key" :class="{ 'row-active': node.active }">
+            <tr v-for="node in dashboardData?.nodes" :key="node.key" :class="{ 'row-active': node.active && node.latency > 0 }">
               <td>
-                <span v-if="node.active" class="active-pill">
+                <span v-if="node.active && node.latency > 0" class="active-pill">
                   <CheckCircle2 :size="12" /> {{ t('dashboard.active_pill') }}
                 </span>
-                <span v-else class="standby-pill">{{ t('dashboard.standby_pill') }}</span>
+                <span v-else-if="node.latency > 0" class="standby-pill">{{ t('dashboard.standby_pill') }}</span>
+                <span v-else class="unreachable-pill">{{ t('dashboard.unreachable_pill') }}</span>
               </td>
               <td class="country-cell">
                 <span class="flag">{{ node.flag }}</span>
@@ -630,12 +652,15 @@ onUnmounted(() => {
               </td>
               <td class="mono">{{ node.port }}</td>
               <td>
-                <span class="latency" :class="{
-                  fast: node.latency < 50,
-                  medium: node.latency >= 50 && node.latency < 100,
-                  slow: node.latency >= 100
+                <span v-if="node.latency > 0" class="latency" :class="{
+                  fast: node.latency < 80,
+                  medium: node.latency >= 80 && node.latency < 200,
+                  slow: node.latency >= 200
                 }">
                   {{ node.latency }} ms
+                </span>
+                <span v-else class="latency unreachable">
+                  {{ t('dashboard.unreachable_pill') }}
                 </span>
               </td>
             </tr>
@@ -1099,6 +1124,24 @@ onUnmounted(() => {
   background: #ef4444;
 }
 
+.latency-badge.unreachable {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.latency-badge.unreachable .dot {
+  background: #ef4444;
+}
+
+.latency-badge.pending {
+  color: #94a3b8;
+}
+
+.latency-badge.pending .dot {
+  background: #64748b;
+}
+
 .btn-test-icon {
   width: 22px;
   height: 22px;
@@ -1232,6 +1275,16 @@ onUnmounted(() => {
   border-radius: 12px;
 }
 
+.unreachable-pill {
+  font-size: 11px;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
 .country-cell {
   display: flex;
   align-items: center;
@@ -1279,6 +1332,10 @@ onUnmounted(() => {
 
 .latency.slow {
   color: #ef4444;
+}
+
+.latency.unreachable {
+  color: #f87171;
 }
 
 .mono {

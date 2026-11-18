@@ -136,7 +136,11 @@ const filteredNodes = computed(() => {
   })
 
   if (sortBy.value === 'latency-asc') {
-    list = [...list].sort((a, b) => a.latency - b.latency)
+    list = [...list].sort((a, b) => {
+      const la = a.latency > 0 ? a.latency : 999999
+      const lb = b.latency > 0 ? b.latency : 999999
+      return la - lb
+    })
   } else if (sortBy.value === 'name-asc') {
     list = [...list].sort((a, b) => a.name.localeCompare(b.name))
   }
@@ -167,17 +171,7 @@ async function pingAllNodes() {
       body: JSON.stringify({ keys: [] })
     })
     if (res.ok) {
-      const data = await res.json()
-      if (data.results && Array.isArray(data.results)) {
-        const map = new Map<string, number>()
-        data.results.forEach((r: any) => map.set(r.key, r.latency))
-        overview.value.nodes.forEach(n => {
-          if (map.has(n.key)) {
-            n.latency = map.get(n.key)!
-          }
-        })
-        overview.value.lastTestedAt = data.lastTestedAt
-      }
+      await fetchOverview()
     }
   } catch (e) {
     console.error('Ping all nodes failed:', e)
@@ -196,14 +190,7 @@ async function pingSingleNode(key: string) {
       body: JSON.stringify({ keys: [key] })
     })
     if (res.ok) {
-      const data = await res.json()
-      if (data.results && data.results.length > 0) {
-        const r = data.results[0]
-        const target = overview.value.nodes.find(n => n.key === key)
-        if (target) {
-          target.latency = r.latency
-        }
-      }
+      await fetchOverview()
     }
   } catch (e) {
     console.error('Ping single node failed:', e)
@@ -441,13 +428,14 @@ onMounted(() => {
               <tr
                 v-for="node in filteredNodes"
                 :key="node.key"
-                :class="{ 'row-active': node.active }"
+                :class="{ 'row-active': node.active && node.latency > 0 }"
               >
                 <td>
-                  <span v-if="node.active" class="active-pill" :title="t('nodes.active_traffic_title')">
+                  <span v-if="node.active && node.latency > 0" class="active-pill" :title="t('nodes.active_traffic_title')">
                     <CheckCircle2 :size="12" /> {{ t('nodes.table.active') }}
                   </span>
-                  <span v-else class="standby-pill">{{ t('nodes.table.standby') }}</span>
+                  <span v-else-if="node.latency > 0" class="standby-pill">{{ t('nodes.table.standby') }}</span>
+                  <span v-else class="unreachable-pill">{{ t('nodes.table.unreachable') }}</span>
                 </td>
 
                 <td class="country-cell">
@@ -470,34 +458,37 @@ onMounted(() => {
                 </td>
 
                 <td class="addr-cell">
-                  <div class="addr-box mono truncate" :title="node.address + ':' + node.port">
+                  <div class="addr-box mono truncate" :title="node.address + (node.port && node.port !== '-' ? ':' + node.port : '')">
                     <span>{{ node.address }}</span>
-                    <span class="port-tag">:{{ node.port }}</span>
+                    <span v-if="node.port && node.port !== '-'" class="port-tag">:{{ node.port }}</span>
                   </div>
                 </td>
 
                 <td>
-                  <div class="latency-box">
+                  <div v-if="node.latency > 0" class="latency-box">
                     <div
                       class="latency-bar"
                       :class="{
-                        fast: node.latency < 50,
-                        medium: node.latency >= 50 && node.latency < 100,
-                        slow: node.latency >= 100
+                        fast: node.latency < 80,
+                        medium: node.latency >= 80 && node.latency < 200,
+                        slow: node.latency >= 200
                       }"
                       :style="{ width: Math.min(100, (node.latency / 200) * 100) + '%' }"
                     ></div>
                     <span
                       class="latency-val mono"
                       :class="{
-                        fast: node.latency < 50,
-                        medium: node.latency >= 50 && node.latency < 100,
-                        slow: node.latency >= 100
+                        fast: node.latency < 80,
+                        medium: node.latency >= 80 && node.latency < 200,
+                        slow: node.latency >= 200
                       }"
                     >
                       {{ node.latency }} ms
                     </span>
                   </div>
+                  <span v-else class="unreachable-pill mono">
+                    {{ t('nodes.table.unreachable') }}
+                  </span>
                 </td>
 
                 <td style="text-align: right">
@@ -1108,6 +1099,20 @@ onMounted(() => {
   color: var(--text-muted, #64748b);
   font-size: 11px;
   padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.unreachable-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  color: #f87171;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
   white-space: nowrap;
 }
 

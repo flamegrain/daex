@@ -1,8 +1,7 @@
 package main
 
 import (
-	"crypto/rand"
-	"math/big"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -64,12 +63,88 @@ type RouteTraceResult struct {
 }
 
 var (
-	latencyMu     sync.RWMutex
-	nodeLatencies = make(map[string]int)
+	latencyMu      sync.RWMutex
+	nodeLatencies  = make(map[string]int)
 	globalLastTest int64
 )
 
-// getNodesOverview reads and parses the active config into high-level models.
+// probeNodeTCP performs a real TCP handshake to address:port and returns (latencyMs, status, message).
+// Returns latencyMs = -1 and status = "timeout" when the address is a placeholder or TCP connection fails.
+func probeNodeTCP(address, port string, timeout time.Duration) (int, string, string) {
+	addr := strings.TrimSpace(address)
+	p := strings.TrimSpace(port)
+	if addr == "" || addr == "-" || strings.EqualFold(addr, "link") || strings.EqualFold(addr, "ip") || strings.Contains(addr, " ") {
+		return -1, "timeout", fmt.Sprintf("示例占位地址 (%s:%s)，无法建立真实连接", addr, p)
+	}
+	if p == "" || p == "-" || strings.EqualFold(p, "port") {
+		return -1, "timeout", fmt.Sprintf("无效端口 (%s)，无法建立连接", p)
+	}
+	portNum, err := strconv.Atoi(p)
+	if err != nil || portNum <= 0 || portNum > 65535 {
+		return -1, "timeout", fmt.Sprintf("无效端口号 (%s)", p)
+	}
+
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, p), timeout)
+	if err != nil {
+		return -1, "timeout", "TCP 连接失败: " + err.Error()
+	}
+	_ = conn.Close()
+	ms := int(time.Since(start).Milliseconds())
+	if ms <= 0 {
+		ms = 1
+	}
+	if ms > 200 {
+		return ms, "slow", fmt.Sprintf("TCP 连接成功 (%d ms，延迟偏高)", ms)
+	}
+	return ms, "ok", fmt.Sprintf("TCP 连接正常 (%d ms)", ms)
+}
+
+func ensureNodesProbed(nodes []NodeItem) int64 {
+	now := time.Now().Unix()
+	latencyMu.RLock()
+	needProbe := (now - globalLastTest) > 15
+	if !needProbe {
+		for _, n := range nodes {
+			if _, ok := nodeLatencies[n.Key]; !ok {
+				needProbe = true
+				break
+			}
+		}
+	}
+	latencyMu.RUnlock()
+
+	if !needProbe {
+		latencyMu.RLock()
+		defer latencyMu.RUnlock()
+		return globalLastTest
+	}
+
+	results := make(map[string]int, len(nodes))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for _, n := range nodes {
+		wg.Add(1)
+		go func(item NodeItem) {
+			defer wg.Done()
+			ms, _, _ := probeNodeTCP(item.Address, item.Port, 1200*time.Millisecond)
+			mu.Lock()
+			results[item.Key] = ms
+			mu.Unlock()
+		}(n)
+	}
+	wg.Wait()
+
+	latencyMu.Lock()
+	for k, v := range results {
+		nodeLatencies[k] = v
+	}
+	globalLastTest = now
+	latencyMu.Unlock()
+	return now
+}
+
+// getNodesOverview reads and parses the active config into high-level models with real TCP reachability.
 func getNodesOverview(activeConfigFile string) (NodesOverviewResponse, error) {
 	b, err := os.ReadFile(activeConfigFile)
 	if err != nil {
@@ -78,62 +153,79 @@ func getNodesOverview(activeConfigFile string) (NodesOverviewResponse, error) {
 	content := string(b)
 	model := parseDaeConfigToModel(content)
 
+	// Parse nodes
+	nodes := parseMockNodes(content)
+	lastTested := ensureNodesProbed(nodes)
+
 	latencyMu.RLock()
 	cachedLatencies := make(map[string]int, len(nodeLatencies))
 	for k, v := range nodeLatencies {
 		cachedLatencies[k] = v
 	}
-	lastTested := globalLastTest
 	latencyMu.RUnlock()
 
-	// Parse nodes
-	nodes := parseMockNodes(content)
-	activeCount := 0
 	nodeMap := make(map[string]NodeItem)
-
 	for i := range nodes {
-		if lat, ok := cachedLatencies[nodes[i].Key]; ok && lat > 0 {
+		nodes[i].Active = false
+		if lat, ok := cachedLatencies[nodes[i].Key]; ok {
 			nodes[i].Latency = lat
+		} else {
+			nodes[i].Latency = -1
 		}
-		if nodes[i].Active {
-			activeCount++
+		if nodes[i].Latency > 200 {
+			nodes[i].Status = "slow"
+		} else if nodes[i].Latency > 0 {
+			nodes[i].Status = "ok"
+		} else {
+			nodes[i].Status = "timeout"
 		}
 		nodeMap[nodes[i].Key] = nodes[i]
 	}
+
+	selectedByGroup := make(map[string]bool)
 
 	// Parse Groups and match nodes
 	var groupOverviews []GroupOverviewItem
 	for _, g := range model.Groups {
 		matchedKeys := make(map[string]bool)
 
-		for _, filter := range g.Filters {
-			f := strings.TrimSpace(filter)
-			// e.g. name(hk_vless_01, jp_trojan_01)
-			if strings.HasPrefix(f, "name(") && strings.HasSuffix(f, ")") {
-				inner := strings.TrimSuffix(strings.TrimPrefix(f, "name("), ")")
-				if strings.HasPrefix(inner, "keyword:") {
-					kw := strings.Trim(strings.TrimPrefix(inner, "keyword:"), " '\"")
+		if len(g.Filters) == 0 {
+			// No filter means all nodes in pool are candidates
+			for _, n := range nodes {
+				matchedKeys[n.Key] = true
+			}
+		} else {
+			for _, filter := range g.Filters {
+				f := strings.TrimSpace(filter)
+				if idx := strings.Index(f, "["); idx != -1 {
+					f = strings.TrimSpace(f[:idx])
+				}
+				if strings.HasPrefix(f, "name(") && strings.HasSuffix(f, ")") {
+					inner := strings.TrimSuffix(strings.TrimPrefix(f, "name("), ")")
+					if strings.HasPrefix(inner, "keyword:") {
+						kw := strings.Trim(strings.TrimPrefix(inner, "keyword:"), " '\"")
+						for _, n := range nodes {
+							if strings.Contains(strings.ToUpper(n.Name), strings.ToUpper(kw)) ||
+								strings.Contains(strings.ToUpper(n.Key), strings.ToUpper(kw)) {
+								matchedKeys[n.Key] = true
+							}
+						}
+					} else {
+						parts := strings.Split(inner, ",")
+						for _, p := range parts {
+							key := strings.Trim(strings.TrimSpace(p), " '\"")
+							if _, exists := nodeMap[key]; exists {
+								matchedKeys[key] = true
+							}
+						}
+					}
+				} else if strings.HasPrefix(f, "subtag(") && strings.HasSuffix(f, ")") {
+					sub := strings.Trim(strings.TrimSuffix(strings.TrimPrefix(f, "subtag("), ")"), " '\"")
 					for _, n := range nodes {
-						if strings.Contains(strings.ToUpper(n.Name), strings.ToUpper(kw)) ||
-							strings.Contains(strings.ToUpper(n.Key), strings.ToUpper(kw)) {
+						if strings.Contains(strings.ToLower(n.Key), strings.ToLower(sub)) ||
+							strings.Contains(strings.ToLower(n.Name), strings.ToLower(sub)) {
 							matchedKeys[n.Key] = true
 						}
-					}
-				} else {
-					parts := strings.Split(inner, ",")
-					for _, p := range parts {
-						key := strings.Trim(strings.TrimSpace(p), " '\"")
-						if _, exists := nodeMap[key]; exists {
-							matchedKeys[key] = true
-						}
-					}
-				}
-			} else if strings.HasPrefix(f, "subtag(") && strings.HasSuffix(f, ")") {
-				sub := strings.Trim(strings.TrimSuffix(strings.TrimPrefix(f, "subtag("), ")"), " '\"")
-				for _, n := range nodes {
-					if strings.Contains(strings.ToLower(n.Key), strings.ToLower(sub)) ||
-						strings.Contains(strings.ToLower(n.Name), strings.ToLower(sub)) {
-						matchedKeys[n.Key] = true
 					}
 				}
 			}
@@ -149,38 +241,42 @@ func getNodesOverview(activeConfigFile string) (NodesOverviewResponse, error) {
 
 		policyStr := g.Policy
 		if policyStr == "" {
-			policyStr = "min_latency"
+			policyStr = "min_moving_avg"
 		}
 
-		// Select optimal node according to group policy
+		// Select optimal node ONLY among reachable nodes (Latency > 0)
 		var selNode *NodeItem
 		if len(keyList) > 0 {
 			if strings.HasPrefix(policyStr, "fixed(") && strings.HasSuffix(policyStr, ")") {
 				idxStr := strings.TrimSuffix(strings.TrimPrefix(policyStr, "fixed("), ")")
 				if fixedIdx, err := strconv.Atoi(strings.TrimSpace(idxStr)); err == nil {
 					if fixedIdx >= 0 && fixedIdx < len(keyList) {
-						chosen := nodeMap[keyList[fixedIdx]]
-						selNode = &chosen
-					} else {
-						chosen := nodeMap[keyList[0]]
-						selNode = &chosen
+						cand := nodeMap[keyList[fixedIdx]]
+						if cand.Latency > 0 {
+							selNode = &cand
+						}
 					}
 				}
 			}
 			if selNode == nil {
-				// Find lowest latency by default for min_latency / min_moving_avg
-				bestIdx := 0
-				bestLat := 9999
+				bestIdx := -1
+				bestLat := 999999
 				for idx, k := range keyList {
 					n := nodeMap[k]
-					if n.Latency < bestLat {
+					if n.Latency > 0 && n.Latency < bestLat {
 						bestLat = n.Latency
 						bestIdx = idx
 					}
 				}
-				chosen := nodeMap[keyList[bestIdx]]
-				selNode = &chosen
+				if bestIdx >= 0 {
+					chosen := nodeMap[keyList[bestIdx]]
+					selNode = &chosen
+				}
 			}
+		}
+
+		if selNode != nil && selNode.Latency > 0 {
+			selectedByGroup[selNode.Key] = true
 		}
 
 		groupOverviews = append(groupOverviews, GroupOverviewItem{
@@ -193,7 +289,16 @@ func getNodesOverview(activeConfigFile string) (NodesOverviewResponse, error) {
 		})
 	}
 
-	// Subscriptions
+	// Mark nodes Active only if they are reachable and actively selected by a group
+	activeCount := 0
+	for i := range nodes {
+		if nodes[i].Latency > 0 && selectedByGroup[nodes[i].Key] {
+			nodes[i].Active = true
+			activeCount++
+		}
+	}
+
+	// Subscriptions (only count actually matched nodes, never fake 3)
 	var subOverviews []SubscriptionOverviewItem
 	for _, s := range model.Subscriptions {
 		cnt := 0
@@ -202,9 +307,6 @@ func getNodesOverview(activeConfigFile string) (NodesOverviewResponse, error) {
 				strings.Contains(strings.ToLower(n.Name), strings.ToLower(s.Tag)) {
 				cnt++
 			}
-		}
-		if cnt == 0 && len(nodes) > 0 {
-			cnt = 3 // fallback simulated node count
 		}
 		subOverviews = append(subOverviews, SubscriptionOverviewItem{
 			Tag:       s.Tag,
@@ -224,7 +326,7 @@ func getNodesOverview(activeConfigFile string) (NodesOverviewResponse, error) {
 	}, nil
 }
 
-// pingNodes tests nodes latency.
+// pingNodes tests nodes latency using real concurrent TCP handshakes.
 func pingNodes(keys []string, activeConfigFile string) ([]NodePingResult, int64, error) {
 	b, err := os.ReadFile(activeConfigFile)
 	if err != nil {
@@ -238,48 +340,40 @@ func pingNodes(keys []string, activeConfigFile string) ([]NodePingResult, int64,
 	}
 	allKeys := len(keys) == 0
 
-	now := time.Now().Unix()
-	var results []NodePingResult
-
-	latencyMu.Lock()
-	defer latencyMu.Unlock()
-
+	var toTest []NodeItem
 	for _, n := range nodes {
-		if !allKeys && !targetKeys[n.Key] {
-			continue
+		if allKeys || targetKeys[n.Key] {
+			toTest = append(toTest, n)
 		}
-
-		// Calculate realistic jitter on baseline latency
-		base := n.Latency
-		if base <= 0 {
-			base = 35
-		}
-		jitterBig, _ := rand.Int(rand.Reader, big.NewInt(9))
-		jitter := int(jitterBig.Int64()) - 4 // -4 to +4 ms
-		newLat := base + jitter
-		if newLat < 5 {
-			newLat = 5
-		}
-
-		status := "ok"
-		msg := "Ping 连接正常"
-		if newLat > 120 {
-			status = "slow"
-			msg = "延迟偏高"
-		}
-
-		nodeLatencies[n.Key] = newLat
-		results = append(results, NodePingResult{
-			Key:      n.Key,
-			Name:     n.Name,
-			Protocol: n.Protocol,
-			Latency:  newLat,
-			Status:   status,
-			Message:  msg,
-		})
 	}
 
+	now := time.Now().Unix()
+	results := make([]NodePingResult, len(toTest))
+	var wg sync.WaitGroup
+	for i, n := range toTest {
+		wg.Add(1)
+		go func(idx int, item NodeItem) {
+			defer wg.Done()
+			ms, status, msg := probeNodeTCP(item.Address, item.Port, 1800*time.Millisecond)
+			results[idx] = NodePingResult{
+				Key:      item.Key,
+				Name:     item.Name,
+				Protocol: item.Protocol,
+				Latency:  ms,
+				Status:   status,
+				Message:  msg,
+			}
+		}(i, n)
+	}
+	wg.Wait()
+
+	latencyMu.Lock()
+	for _, r := range results {
+		nodeLatencies[r.Key] = r.Latency
+	}
 	globalLastTest = now
+	latencyMu.Unlock()
+
 	return results, now, nil
 }
 
@@ -396,9 +490,8 @@ func traceRouting(req RouteTraceRequest, activeConfigFile string) (RouteTraceRes
 			}
 		}
 
-		if res.SelectedNode == nil && len(nodes) > 0 {
-			res.SelectedNode = &nodes[0]
-			traceSteps = append(traceSteps, "策略组未指定节点，默认调度香港节点: '"+nodes[0].Name+"'")
+		if res.SelectedNode == nil {
+			traceSteps = append(traceSteps, "❌ 出口路由选路失败: 策略组 '"+target+"' 中没有任何可连接的活跃代理节点，连接将中断")
 		}
 	}
 

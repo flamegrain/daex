@@ -141,18 +141,36 @@ func parseDaeConfigToModel(text string) DaeConfigModel {
 				model.Globals[k] = v
 			}
 		case "subscription":
-			if k, v, ok := strings.Cut(trimmed, ":"); ok {
-				k = strings.TrimSpace(k)
-				v = strings.Trim(strings.TrimSpace(v), "',\"")
+			cleanLine := stripInlineComment(trimmed)
+			if strings.Contains(cleanLine, "://") {
+				schemeIdx := strings.Index(cleanLine, "://")
+				beforeScheme := cleanLine[:schemeIdx]
+				var k, v string
+				if colonIdx := strings.Index(beforeScheme, ":"); colonIdx != -1 {
+					k = strings.TrimSpace(beforeScheme[:colonIdx])
+					v = strings.Trim(strings.TrimSpace(cleanLine[colonIdx+1:]), "',\"")
+				} else {
+					v = strings.Trim(cleanLine, "',\"")
+					k = fmt.Sprintf("sub_%d", len(model.Subscriptions)+1)
+				}
 				model.Subscriptions = append(model.Subscriptions, ConfigSubItem{
 					Tag: k,
 					URL: v,
 				})
 			}
 		case "node":
-			if k, v, ok := strings.Cut(trimmed, ":"); ok {
-				k = strings.TrimSpace(k)
-				v = strings.Trim(strings.TrimSpace(v), "',\"")
+			cleanLine := stripInlineComment(trimmed)
+			if strings.Contains(cleanLine, "://") {
+				schemeIdx := strings.Index(cleanLine, "://")
+				beforeScheme := cleanLine[:schemeIdx]
+				var k, v string
+				if colonIdx := strings.Index(beforeScheme, ":"); colonIdx != -1 {
+					k = strings.TrimSpace(beforeScheme[:colonIdx])
+					v = strings.Trim(strings.TrimSpace(cleanLine[colonIdx+1:]), "',\"")
+				} else {
+					v = strings.Trim(cleanLine, "',\"")
+					k = fmt.Sprintf("node_%d", len(model.Nodes)+1)
+				}
 				parsed := parseNodeURL(k, v)
 				model.Nodes = append(model.Nodes, ConfigNodeItem{
 					Key:      k,

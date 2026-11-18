@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -102,16 +100,17 @@ type NodeItem struct {
 	Country  string `json:"country"`
 	Flag     string `json:"flag"`
 	Active   bool   `json:"active"`
-	Latency  int    `json:"latency"` // ms
+	Latency  int    `json:"latency"` // ms (-1 if unreachable)
+	Status   string `json:"status"`  // "ok", "slow", "timeout"
 	URL      string `json:"url,omitempty"`
 }
 
 type TrafficStats struct {
-	Timestamp  int64   `json:"timestamp"`
-	UploadBps  float64 `json:"uploadBps"`
+	Timestamp   int64   `json:"timestamp"`
+	UploadBps   float64 `json:"uploadBps"`
 	DownloadBps float64 `json:"downloadBps"`
-	TotalRx    uint64  `json:"totalRx"`
-	TotalTx    uint64  `json:"totalTx"`
+	TotalRx     uint64  `json:"totalRx"`
+	TotalTx     uint64  `json:"totalTx"`
 }
 
 var (
@@ -125,13 +124,19 @@ var (
 
 func init() {
 	lastTime = time.Now()
-	// Pre-populate with mock baseline
+	rx, tx, err := readNetBytes()
+	if err == nil {
+		lastRx = rx
+		lastTx = tx
+	}
 	now := time.Now().Unix()
 	for i := 20; i >= 0; i-- {
 		historySpeed = append(historySpeed, TrafficStats{
 			Timestamp:   now - int64(i*2),
-			DownloadBps: float64(1024*1024*2 + (i*150000)%800000),
-			UploadBps:   float64(1024*256 + (i*80000)%300000),
+			DownloadBps: 0,
+			UploadBps:   0,
+			TotalRx:     lastRx,
+			TotalTx:     lastTx,
 		})
 	}
 }
@@ -145,22 +150,18 @@ func startTrafficCollector() {
 
 			trafficMu.Lock()
 			var downBps, upBps float64
-			if err == nil && lastRx > 0 && rx >= lastRx {
+			if err == nil && lastRx > 0 && rx >= lastRx && tx >= lastTx {
 				dur := now.Sub(lastTime).Seconds()
 				if dur > 0 {
 					downBps = float64(rx-lastRx) / dur
 					upBps = float64(tx-lastTx) / dur
 				}
-			} else {
-				// Fallback smooth random realistic variation for mock gateway traffic
-				n1, _ := rand.Int(rand.Reader, big.NewInt(600000))
-				n2, _ := rand.Int(rand.Reader, big.NewInt(150000))
-				downBps = 1024*1024*1.5 + float64(n1.Int64())
-				upBps = 1024*200 + float64(n2.Int64())
 			}
 
-			lastRx = rx
-			lastTx = tx
+			if err == nil {
+				lastRx = rx
+				lastTx = tx
+			}
 			lastTime = now
 
 			stat := TrafficStats{
@@ -213,14 +214,15 @@ func readNetBytes() (uint64, uint64, error) {
 func parseMockNodes(configContent string) []NodeItem {
 	var nodes []NodeItem
 	inNodeSection := false
+	untaggedIdx := 1
 
 	lines := strings.Split(configContent, "\n")
 	for _, rawLine := range lines {
 		line := strings.TrimSpace(rawLine)
-		if strings.HasPrefix(line, "#") {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.HasPrefix(line, "node {") || strings.HasPrefix(line, "node{") {
+		if strings.HasPrefix(line, "node {") || strings.HasPrefix(line, "node{") || line == "node" {
 			inNodeSection = true
 			continue
 		}
@@ -228,27 +230,25 @@ func parseMockNodes(configContent string) []NodeItem {
 			inNodeSection = false
 			break
 		}
-		if inNodeSection && strings.Contains(line, ":") {
-			k, v, ok := strings.Cut(line, ":")
-			if !ok {
-				continue
-			}
-			k = strings.TrimSpace(k)
-			v = strings.Trim(strings.TrimSpace(v), "',\"")
-			if strings.Contains(v, "://") {
-				item := parseNodeURL(k, v)
-				nodes = append(nodes, item)
+		if inNodeSection && strings.Contains(line, "://") {
+			line = stripInlineComment(line)
+			schemeIdx := strings.Index(line, "://")
+			beforeScheme := line[:schemeIdx]
+			if colonIdx := strings.Index(beforeScheme, ":"); colonIdx != -1 {
+				k := strings.TrimSpace(beforeScheme[:colonIdx])
+				v := strings.Trim(strings.TrimSpace(line[colonIdx+1:]), "',\"")
+				if strings.Contains(v, "://") {
+					nodes = append(nodes, parseNodeURL(k, v))
+				}
+			} else {
+				v := strings.Trim(line, "',\"")
+				k := fmt.Sprintf("node_%d", untaggedIdx)
+				untaggedIdx++
+				nodes = append(nodes, parseNodeURL(k, v))
 			}
 		}
 	}
 
-	// Mark active nodes according to groups in mock config
-	if len(nodes) > 0 {
-		nodes[0].Active = true // hk_vless_01
-	}
-	if len(nodes) > 1 {
-		nodes[1].Active = true // jp_trojan_01
-	}
 	return nodes
 }
 
@@ -271,88 +271,145 @@ func parseNodeURL(key, rawURL string) NodeItem {
 	item := NodeItem{
 		Key:     key,
 		Name:    key,
-		Address: "127.0.0.1",
-		Port:    "443",
+		Address: "-",
+		Port:    "-",
 		Country: "未知",
 		Flag:    "🌐",
-		Latency: 35,
+		Active:  false,
+		Latency: -1,
+		Status:  "timeout",
 		URL:     rawURL,
 	}
 
-	u, err := url.Parse(rawURL)
-	if err == nil {
-		item.Protocol = strings.ToUpper(u.Scheme)
-		if item.Protocol == "VMESS" {
-			// parse vmess schema
-			prefix := "vmess" + "://"
-			b64 := strings.TrimPrefix(rawURL, prefix)
-			if decoded, decErr := base64DecodeString(b64); decErr == nil {
-				var vm struct {
-					Ps   string      `json:"ps"`
-					Add  string      `json:"add"`
-					Port interface{} `json:"port"`
-				}
-				if json.Unmarshal(decoded, &vm) == nil {
-					if vm.Ps != "" {
-						item.Name = vm.Ps
-					}
-					if vm.Add != "" {
-						item.Address = vm.Add
-					}
-					switch p := vm.Port.(type) {
-					case string:
-						item.Port = p
-					case float64:
-						item.Port = strconv.Itoa(int(p))
-					}
-				}
-			}
-		} else {
-			if u.Fragment != "" {
-				item.Name, _ = url.QueryUnescape(u.Fragment)
-			}
-			host := u.Hostname()
-			if host != "" {
-				item.Address = host
-			}
-			if u.Port() != "" {
-				item.Port = u.Port()
-			}
-		}
-	} else {
-		proto, _, _ := strings.Cut(rawURL, "://")
-		item.Protocol = strings.ToUpper(proto)
+	// If chain node, parse first hop target
+	firstHop := strings.TrimSpace(rawURL)
+	if strings.Contains(firstHop, "->") {
+		parts := strings.SplitN(firstHop, "->", 2)
+		firstHop = strings.Trim(strings.TrimSpace(parts[0]), "'\"")
 	}
 
-	// Assign country info based on name or key
+	proto, rest, hasScheme := strings.Cut(firstHop, "://")
+	if hasScheme {
+		item.Protocol = strings.ToUpper(strings.TrimSpace(proto))
+	}
+
+	if item.Protocol == "VMESS" {
+		b64 := strings.TrimSpace(rest)
+		if idx := strings.Index(b64, "#"); idx != -1 {
+			if frag, err := url.QueryUnescape(b64[idx+1:]); err == nil && frag != "" {
+				item.Name = frag
+			}
+			b64 = b64[:idx]
+		}
+		decoded, decErr := base64DecodeString(b64)
+		var parsedVmess bool
+		if decErr == nil && len(decoded) > 0 && strings.HasPrefix(strings.TrimSpace(string(decoded)), "{") {
+			var vm struct {
+				Ps   string      `json:"ps"`
+				Add  string      `json:"add"`
+				Port interface{} `json:"port"`
+			}
+			if json.Unmarshal(decoded, &vm) == nil && vm.Add != "" {
+				parsedVmess = true
+				if vm.Ps != "" {
+					item.Name = vm.Ps
+				}
+				item.Address = vm.Add
+				switch p := vm.Port.(type) {
+				case string:
+					if p != "" {
+						item.Port = p
+					}
+				case float64:
+					item.Port = strconv.Itoa(int(p))
+				}
+			}
+		}
+		if !parsedVmess {
+			// Fallback for non-base64 vmess URLs or placeholder links
+			item.Address, item.Port = extractHostAndPortFromRest(rest)
+		}
+	} else if u, err := url.Parse(firstHop); err == nil && u.Hostname() != "" {
+		if u.Fragment != "" {
+			if frag, uErr := url.QueryUnescape(u.Fragment); uErr == nil && frag != "" {
+				item.Name = frag
+			}
+		}
+		item.Address = u.Hostname()
+		if u.Port() != "" {
+			item.Port = u.Port()
+		}
+	} else if hasScheme {
+		// Handle URLs with non-numeric placeholder ports
+		item.Address, item.Port = extractHostAndPortFromRest(rest)
+	}
+
+	// Assign country info based on name or key (never assign fake latency!)
 	upper := strings.ToUpper(item.Name + " " + item.Key)
 	switch {
-	case strings.Contains(upper, "HK") || strings.Contains(upper, "HONG"):
+	case strings.Contains(upper, "HK") || strings.Contains(upper, "HONG") || strings.Contains(item.Name, "香港"):
 		item.Country = "中国香港"
 		item.Flag = "🇭🇰"
-		item.Latency = 28
-	case strings.Contains(upper, "JP") || strings.Contains(upper, "JAPAN"):
+	case strings.Contains(upper, "JP") || strings.Contains(upper, "JAPAN") || strings.Contains(item.Name, "日本"):
 		item.Country = "日本"
 		item.Flag = "🇯🇵"
-		item.Latency = 48
-	case strings.Contains(upper, "SG") || strings.Contains(upper, "SINGAPORE"):
+	case strings.Contains(upper, "SG") || strings.Contains(upper, "SINGAPORE") || strings.Contains(item.Name, "狮城") || strings.Contains(item.Name, "新加坡"):
 		item.Country = "新加坡"
 		item.Flag = "🇸🇬"
-		item.Latency = 62
-	case strings.Contains(upper, "US") || strings.Contains(upper, "UNITED"):
+	case strings.Contains(upper, "US") || strings.Contains(upper, "UNITED") || strings.Contains(item.Name, "美国"):
 		item.Country = "美国"
 		item.Flag = "🇺🇸"
-		item.Latency = 145
-	case strings.Contains(upper, "TW") || strings.Contains(upper, "TAIWAN"):
+	case strings.Contains(upper, "TW") || strings.Contains(upper, "TAIWAN") || strings.Contains(item.Name, "台湾"):
 		item.Country = "中国台湾"
 		item.Flag = "🇹🇼"
-		item.Latency = 38
 	default:
-		item.Country = "局域/保留"
-		item.Flag = "🛡️"
-		item.Latency = 15
+		item.Country = "未知/示例"
+		item.Flag = "🌐"
 	}
 	return item
+}
+
+func stripInlineComment(line string) string {
+	inQuote := byte(0)
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if inQuote != 0 {
+			if ch == inQuote {
+				inQuote = 0
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			inQuote = ch
+			continue
+		}
+		if ch == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t') {
+			return strings.TrimSpace(line[:i])
+		}
+	}
+	return strings.TrimSpace(line)
+}
+
+func extractHostAndPortFromRest(rest string) (string, string) {
+	s := strings.TrimSpace(rest)
+	if idx := strings.IndexAny(s, "/?#"); idx != -1 {
+		s = s[:idx]
+	}
+	if atIdx := strings.LastIndex(s, "@"); atIdx != -1 {
+		s = s[atIdx+1:]
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "-", "-"
+	}
+	if h, p, err := net.SplitHostPort(s); err == nil {
+		return h, p
+	}
+	if strings.Contains(s, ":") && !strings.HasPrefix(s, "[") {
+		h, p, _ := strings.Cut(s, ":")
+		return strings.TrimSpace(h), strings.TrimSpace(p)
+	}
+	return s, "-"
 }
 
 func main() {
@@ -417,8 +474,8 @@ func main() {
 		copy(hist, historySpeed)
 		trafficMu.RUnlock()
 
-		b, _ := os.ReadFile(o.DaeConfig)
-		nodes := parseMockNodes(string(b))
+		ovw, _ := getNodesOverview(o.DaeConfig)
+		nodes := ovw.Nodes
 
 		// Country stats aggregation
 		countryMap := make(map[string]int)
@@ -432,18 +489,22 @@ func main() {
 		}
 		var countryList []CountryCount
 		flagMap := map[string]string{
-			"中国香港": "🇭🇰",
-			"日本":   "🇯🇵",
-			"新加坡":  "🇸🇬",
-			"美国":   "🇺🇸",
-			"中国台湾": "🇹🇼",
-			"局域/保留": "🛡️",
+			"中国香港":  "🇭🇰",
+			"日本":    "🇯🇵",
+			"新加坡":   "🇸🇬",
+			"美国":    "🇺🇸",
+			"中国台湾":  "🇹🇼",
+			"未知/示例": "🌐",
 		}
 		for c, cnt := range countryMap {
+			f := flagMap[c]
+			if f == "" {
+				f = "🌐"
+			}
 			countryList = append(countryList, CountryCount{
 				Name:  c,
 				Count: cnt,
-				Flag:  flagMap[c],
+				Flag:  f,
 			})
 		}
 		sort.Slice(countryList, func(i, j int) bool {
@@ -452,12 +513,13 @@ func main() {
 
 		isMock := strings.Contains(strings.ToLower(filepath.Base(o.DaeConfig)), "mock")
 		writeJSON(w, http.StatusOK, map[string]any{
-			"dae":      daeStatus(r.Context(), o),
-			"isMock":   isMock,
-			"current":  current,
-			"history":  hist,
-			"nodes":    nodes,
-			"countries": countryList,
+			"dae":         daeStatus(r.Context(), o),
+			"isMock":      isMock,
+			"current":     current,
+			"history":     hist,
+			"nodes":       nodes,
+			"activeNodes": ovw.ActiveNodes,
+			"countries":   countryList,
 		})
 	})
 
@@ -1681,70 +1743,70 @@ func listConfigProfiles(activeConfig string) ([]ConfigProfile, error) {
 
 func fetchSubscriptionNodes(ctx context.Context, tag, subURL, activeConfigFile string) ([]NodeItem, error) {
 	var nodes []NodeItem
+	subURL = strings.TrimSpace(subURL)
+	if subURL == "" {
+		return nil, fmt.Errorf("订阅地址为空")
+	}
 
-	isMock := strings.Contains(subURL, "example.invalid") ||
-		strings.Contains(subURL, "example.com") ||
-		strings.Contains(subURL, "localhost")
-
-	if !isMock {
+	var rawStr string
+	if strings.HasPrefix(subURL, "http://") || strings.HasPrefix(subURL, "https://") {
+		if strings.Contains(subURL, "example.invalid") || strings.Contains(subURL, "example.com") {
+			return nil, fmt.Errorf("示例占位订阅地址 (%s) 无法连接，请替换为真实有效的订阅 URL", subURL)
+		}
 		req, err := http.NewRequestWithContext(ctx, "GET", subURL, nil)
-		if err == nil {
-			req.Header.Set("User-Agent", "clash-meta/v1.18.0 dae/2.1.1")
-			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Do(req)
-			if err == nil && resp.StatusCode == 200 {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
-
-				rawStr := string(bodyBytes)
-				if dec, decErr := base64DecodeString(rawStr); decErr == nil && len(dec) > 0 {
-					rawStr = string(dec)
-				}
-
-				lines := strings.Split(rawStr, "\n")
-				idx := 1
-				for _, l := range lines {
-					l = strings.TrimSpace(l)
-					if l == "" || strings.HasPrefix(l, "#") {
-						continue
-					}
-					if strings.Contains(l, "://") {
-						k := fmt.Sprintf("%s_node_%02d", tag, idx)
-						idx++
-						nodes = append(nodes, parseNodeURL(k, l))
-					}
-				}
-				if len(nodes) > 0 {
-					return nodes, nil
-				}
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "clash-meta/v1.18.0 dae/2.1.2")
+		client := &http.Client{Timeout: 8 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("连接订阅源失败: %v", err)
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("订阅源返回 HTTP %d", resp.StatusCode)
+		}
+		rawStr = string(bodyBytes)
+	} else {
+		// Support file:// or relative file inside /usr/local/etc/dae/
+		relPath := strings.TrimPrefix(subURL, "file://")
+		candidates := []string{
+			filepath.Join(filepath.Dir(activeConfigFile), relPath),
+			filepath.Join("/usr/local/etc/dae", relPath),
+			filepath.Join("/etc/dae", relPath),
+		}
+		for _, c := range candidates {
+			if b, err := os.ReadFile(c); err == nil && len(b) > 0 {
+				rawStr = string(b)
+				break
 			}
+		}
+		if rawStr == "" {
+			return nil, fmt.Errorf("本地订阅文件不存在或为空: %s", subURL)
 		}
 	}
 
-	// Mock / safe fallback: derive from mock config to provide safe, realistic subscription nodes
-	b, _ := os.ReadFile(activeConfigFile)
-	allMock := parseMockNodes(string(b))
-
-	prefix := strings.TrimSpace(tag)
-	if prefix == "" {
-		prefix = "sub"
+	if dec, decErr := base64DecodeString(rawStr); decErr == nil && len(dec) > 0 {
+		rawStr = string(dec)
 	}
 
-	var selected []NodeItem
-	if strings.HasSuffix(prefix, "_b") && len(allMock) >= 4 {
-		selected = allMock[3:]
-	} else if len(allMock) >= 4 {
-		selected = allMock[:4]
-	} else {
-		selected = allMock
+	lines := strings.Split(rawStr, "\n")
+	idx := 1
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		if strings.Contains(l, "://") {
+			k := fmt.Sprintf("%s_node_%02d", tag, idx)
+			idx++
+			nodes = append(nodes, parseNodeURL(k, l))
+		}
 	}
-
-	for i, m := range selected {
-		item := m
-		item.Key = fmt.Sprintf("%s_%s", prefix, m.Key)
-		item.Name = fmt.Sprintf("[%s] %s", strings.ToUpper(prefix), m.Name)
-		item.Active = (i == 0)
-		nodes = append(nodes, item)
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("未从订阅源解析出任何有效代理节点")
 	}
 
 	return nodes, nil
